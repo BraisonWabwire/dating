@@ -26,8 +26,7 @@ class _LoginState extends State<Login> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFBDDD3),
-      appBar: AppBar(backgroundColor: const Color(0xFFFBDDD3),
-       ),
+      appBar: AppBar(backgroundColor: const Color(0xFFFBDDD3)),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -130,8 +129,9 @@ class _LoginState extends State<Login> {
                             ),
                           ),
                           onPressed: () {
-                            // Login logic here
+                            
                           },
+
                           child: Text(
                             'Sign in',
                             style: GoogleFonts.lato(

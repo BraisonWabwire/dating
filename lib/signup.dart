@@ -23,7 +23,7 @@ class _SignupState extends State<Signup> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFBDDD3),
-      appBar: AppBar(backgroundColor: const Color(0xFFFBDDD3), elevation: 0),
+      appBar: AppBar(backgroundColor: const Color(0xFFFBDDD3), elevation: 0,  automaticallyImplyLeading: false,),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(

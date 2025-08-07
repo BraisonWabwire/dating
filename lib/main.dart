@@ -1,3 +1,4 @@
+import 'package:dating/profiles.dart';
 import 'package:flutter/material.dart';
 import 'package:dating/welcome_screen.dart';
 import 'package:dating/login.dart';
@@ -23,7 +24,8 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const WelcomeScreen(),   // Default screen
         '/login': (context) => const Login(),      // Login screen
-        '/signup': (context) => const Signup(),    // Signup screen
+        '/signup': (context) => const Signup(),
+        '/profiles': (context) => const Profiles(), // Profiles screen
       },
     );
   }

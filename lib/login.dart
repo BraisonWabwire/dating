@@ -129,7 +129,7 @@ class _LoginState extends State<Login> {
                             ),
                           ),
                           onPressed: () {
-                            
+                            Navigator.pushNamed(context, '/profiles');
                           },
 
                           child: Text(

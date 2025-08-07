@@ -1,4 +1,3 @@
-import 'package:dating/login.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -221,12 +220,7 @@ class _SignupState extends State<Signup> {
                       const SizedBox(height: 10),
                       GestureDetector(
                         onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => Login(),
-                            ),
-                          );
+                         Navigator.pushNamed(context, '/login');
                         },
                         child: const Text(
                           "Already have an account? Sign in",

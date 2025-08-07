@@ -1,7 +1,9 @@
-import 'package:dating/welcome_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:dating/welcome_screen.dart';
+import 'package:dating/login.dart';
+import 'package:dating/signup.dart';
 
-void main(){
+void main() {
   runApp(const MyApp());
 }
 
@@ -13,9 +15,16 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Dating App',
-      home: WelcomeScreen(),
-
       
+      // Initial screen (default route)
+      initialRoute: '/',
+      
+      // Define named routes
+      routes: {
+        '/': (context) => const WelcomeScreen(),   // Default screen
+        '/login': (context) => const Login(),      // Login screen
+        '/signup': (context) => const Signup(),    // Signup screen
+      },
     );
   }
 }

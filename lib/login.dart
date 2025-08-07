@@ -1,4 +1,3 @@
-import 'package:dating/signup.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -28,7 +27,6 @@ class _LoginState extends State<Login> {
     return Scaffold(
       backgroundColor: const Color(0xFFFBDDD3),
       appBar: AppBar(backgroundColor: const Color(0xFFFBDDD3),
-       automaticallyImplyLeading: false,
        ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -204,12 +202,7 @@ class _LoginState extends State<Login> {
                       const SizedBox(height: 10),
                       GestureDetector(
                         onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => Signup(),
-                            ), // <-- Replace with your login page
-                          );
+                          Navigator.pushNamed(context, '/signup');
                         },
                         child: const Text(
                           "Do not have an account? Sign up",

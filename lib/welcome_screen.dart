@@ -1,3 +1,5 @@
+import 'package:dating/login.dart';
+import 'package:dating/signup.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -55,7 +57,10 @@ class WelcomeScreen extends StatelessWidget {
                   padding: EdgeInsets.symmetric(horizontal: 50, vertical: 15),
                 ),
                 onPressed: () {
-                  // Handle login action
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => Login()),
+                  );
                 },
                 child: Text(
                   'Login',
@@ -73,7 +78,10 @@ class WelcomeScreen extends StatelessWidget {
                   padding: EdgeInsets.symmetric(horizontal: 45, vertical: 15),
                 ),
                 onPressed: () {
-                  // Handle signup action
+                   Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => Signup()),
+                  );
                 },
                 child: Text(
                   'Signup',

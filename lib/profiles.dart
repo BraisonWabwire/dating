@@ -145,7 +145,9 @@ class _ProfilesState extends State<Profiles> {
                     ),
                   ),
                   ElevatedButton(
-                    onPressed: () {},
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/Chat_page');
+                    },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFF06292),
                       shape: const CircleBorder(),
@@ -170,15 +172,20 @@ class _ProfilesState extends State<Profiles> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.person, color: Colors.white, size: 30),
-                  const Text(
-                    "Profile",
-                    style: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ],
+              GestureDetector(
+                onTap: () {
+                  Navigator.pushNamed(context, '/update_profile');
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person, color: Colors.white, size: 30),
+                    const Text(
+                      "Profile",
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
               Column(
                 mainAxisSize: MainAxisSize.min,
@@ -190,15 +197,20 @@ class _ProfilesState extends State<Profiles> {
                   ),
                 ],
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.chat, color: Colors.white, size: 30),
-                  const Text(
-                    "Chats",
-                    style: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ],
+              GestureDetector(
+                onTap: (){
+                  // Navigator.pushNamed(context, '/Chat_page');
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.chat, color: Colors.white, size: 30),
+                    const Text(
+                      "Chats",
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
               Column(
                 mainAxisSize: MainAxisSize.min,

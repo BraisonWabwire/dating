@@ -149,10 +149,10 @@ class _LoginState extends State<Login> {
                         decoration: InputDecoration(
                           labelText: 'Password',
                           labelStyle: const TextStyle(color: Color(0xFFE91E63)),
-                          focusedBorder: const UnderlineInputBorder(
+                          focusedBorder: UnderlineInputBorder(
                             borderSide: BorderSide(color: Color(0xFFE91E63)),
                           ),
-                          enabledBorder: const UnderlineInputBorder(
+                          enabledBorder: UnderlineInputBorder(
                             borderSide: BorderSide(color: Color(0xFF757575)),
                           ),
                           suffixIcon: IconButton(
@@ -209,26 +209,27 @@ class _LoginState extends State<Login> {
                                     });
                                     try {
                                       final authService = AuthService();
+                                      // Check if email exists
+                                      final emailExists = await authService.checkEmailExists(emailController.text);
+                                      if (!emailExists) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('No account found with this email. Please sign up.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      // Attempt login
                                       await authService.loginWithEmailPassword(
                                         emailController.text,
                                         passwordController.text,
                                       );
-                                      if (await authService.isEmailVerified()) {
-                                        Navigator.pushNamedAndRemoveUntil(
-                                          context,
-                                          '/profiles',
-                                          (route) => false,
-                                        );
-                                      } else {
-                                        await authService.signOut();
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Please verify your email before logging in. Check your inbox or spam folder.',
-                                            ),
-                                          ),
-                                        );
-                                      }
+                                      // If login succeeds (email is verified), navigate to profiles
+                                      Navigator.pushNamedAndRemoveUntil(
+                                        context,
+                                        '/profiles',
+                                        (route) => false,
+                                      );
                                     } catch (e) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(

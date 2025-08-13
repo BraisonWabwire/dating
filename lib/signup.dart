@@ -59,10 +59,7 @@ class _SignupState extends State<Signup> {
               Form(
                 key: _formKey,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 50,
-                    vertical: 20,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 20),
                   child: Column(
                     children: [
                       TextFormField(
@@ -81,8 +78,7 @@ class _SignupState extends State<Signup> {
                           if (value == null || value.isEmpty) {
                             return 'Please enter your email';
                           }
-                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                              .hasMatch(value)) {
+                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
                             return 'Please enter a valid email';
                           }
                           return null;
@@ -95,17 +91,15 @@ class _SignupState extends State<Signup> {
                         decoration: InputDecoration(
                           labelText: 'Password',
                           labelStyle: const TextStyle(color: Color(0xFFE91E63)),
-                          focusedBorder: const UnderlineInputBorder(
+                          focusedBorder: UnderlineInputBorder(
                             borderSide: BorderSide(color: Color(0xFFE91E63)),
                           ),
-                          enabledBorder: const UnderlineInputBorder(
+                          enabledBorder: UnderlineInputBorder(
                             borderSide: BorderSide(color: Color(0xFF757575)),
                           ),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
+                              _obscurePassword ? Icons.visibility_off : Icons.visibility,
                               color: const Color(0xFFE91E63),
                             ),
                             onPressed: () {
@@ -145,22 +139,35 @@ class _SignupState extends State<Signup> {
                                     });
                                     try {
                                       final authService = AuthService();
-                                      await authService.signUpWithEmailPassword(
+                                      // Check if email exists
+                                      final emailExists = await authService.checkEmailExists(emailController.text);
+                                      if (emailExists) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('This email is already registered. Please log in.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      // Proceed with signup
+                                      final user = await authService.signUpWithEmailPassword(
                                         emailController.text,
                                         passwordController.text,
                                       );
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Registration successful! A verification email has been sent. Please check your inbox or spam folder.',
+                                      if (user != null) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Registration successful! A verification email has been sent. Please check your inbox or spam folder.',
+                                            ),
                                           ),
-                                        ),
-                                      );
-                                      Navigator.pushNamedAndRemoveUntil(
-                                        context,
-                                        '/email_verification',
-                                        (route) => false,
-                                      );
+                                        );
+                                        Navigator.pushNamedAndRemoveUntil(
+                                          context,
+                                          '/email_verification',
+                                          (route) => false,
+                                        );
+                                      }
                                     } catch (e) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(

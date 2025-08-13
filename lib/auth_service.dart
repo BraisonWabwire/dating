@@ -4,6 +4,35 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  // Check if email exists using sendPasswordResetEmail
+  Future<bool> checkEmailExists(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email.trim());
+      if (kDebugMode) {
+        print('Email check for $email: exists (password reset email sent)');
+      }
+      return true; // Email exists if no error is thrown
+    } on FirebaseAuthException catch (e) {
+      if (kDebugMode) {
+        print('Email check error for $email: ${e.code} - ${e.message}');
+      }
+      if (e.code == 'user-not-found') {
+        return false; // Email does not exist
+      } else if (e.code == 'invalid-email') {
+        throw Exception('The email address is invalid.');
+      } else if (e.code == 'too-many-requests') {
+        throw Exception('Too many attempts. Please try again later.');
+      } else {
+        throw Exception(_handleAuthException(e));
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Unexpected error checking email: $e');
+      }
+      throw Exception('Failed to check email: $e');
+    }
+  }
+
   // Sign up with email and password
   Future<User?> signUpWithEmailPassword(String email, String password) async {
     try {
@@ -35,10 +64,21 @@ class AuthService {
         email: email.trim(),
         password: password.trim(),
       );
-      if (kDebugMode) {
-        print('User logged in: ${userCredential.user?.email}, Verified: ${userCredential.user?.emailVerified}');
+      if (userCredential.user != null) {
+        await userCredential.user!.reload();
+        if (!userCredential.user!.emailVerified) {
+          if (kDebugMode) {
+            print('User ${userCredential.user!.email} attempted login but email is not verified');
+          }
+          await _auth.signOut();
+          throw Exception('Please verify your email before logging in.');
+        }
+        if (kDebugMode) {
+          print('User logged in: ${userCredential.user?.email}, Verified: ${userCredential.user?.emailVerified}');
+        }
+        return userCredential.user;
       }
-      return userCredential.user;
+      return null;
     } on FirebaseAuthException catch (e) {
       if (kDebugMode) {
         print('Login error: ${e.code} - ${e.message}');

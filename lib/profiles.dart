@@ -1,5 +1,7 @@
+import 'package:dating/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:card_swiper/card_swiper.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class Profiles extends StatefulWidget {
   const Profiles({super.key});
@@ -32,11 +34,32 @@ class _ProfilesState extends State<Profiles> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Swipe Profiles',
+          'Swipe For A Match',
           style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
         ),
         backgroundColor: const Color(0xFFE91E63),
         centerTitle: true,
+        actions: [
+          IconButton(
+      icon: Icon(Icons.logout, color: Colors.white),
+      tooltip: 'Log out',
+      onPressed: () async {
+        try {
+          final authService = AuthService();
+          await authService.signOut();
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            '/login',
+            (route) => false,
+          );
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Logout failed: $e')),
+          );
+        }
+      },
+    ),
+        ],
       ),
       body: Column(
         children: [
@@ -198,7 +221,7 @@ class _ProfilesState extends State<Profiles> {
                 ],
               ),
               GestureDetector(
-                onTap: (){
+                onTap: () {
                   // Navigator.pushNamed(context, '/Chat_page');
                 },
                 child: Column(

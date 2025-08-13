@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'auth_service.dart';
 
 class Login extends StatefulWidget {
   const Login({super.key});
@@ -13,20 +13,76 @@ class _LoginState extends State<Login> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _isLoading = false;
 
-  bool _obscureText = true;
+  Future<void> _handleForgotPassword() async {
+    String email = emailController.text.trim();
+    if (email.isEmpty) {
+      email = await showDialog<String>(
+            context: context,
+            builder: (context) {
+              final TextEditingController dialogEmailController = TextEditingController();
+              return AlertDialog(
+                title: const Text('Reset Password'),
+                content: TextField(
+                  controller: dialogEmailController,
+                  decoration: const InputDecoration(
+                    labelText: 'Enter your email',
+                    labelStyle: TextStyle(color: Color(0xFFE91E63)),
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, dialogEmailController.text.trim()),
+                    child: const Text('Submit'),
+                  ),
+                ],
+              );
+            },
+          ) ??
+          '';
+    }
 
-  void _togglePasswordView() {
-    setState(() {
-      _obscureText = !_obscureText;
-    });
+    if (email.isNotEmpty) {
+      setState(() {
+        _isLoading = true;
+      });
+      try {
+        final authService = AuthService();
+        await authService.resetPassword(email);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Password reset email sent. Check your inbox or spam folder.')),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        );
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please provide an email')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFBDDD3),
-      appBar: AppBar(backgroundColor: const Color(0xFFFBDDD3)),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFBDDD3),
+        elevation: 0,
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -61,11 +117,7 @@ class _LoginState extends State<Login> {
               Form(
                 key: _formKey,
                 child: Padding(
-                  padding: const EdgeInsets.only(
-                    left: 50.0,
-                    right: 50.0,
-                    top: 20.0,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 20),
                   child: Column(
                     children: [
                       TextFormField(
@@ -84,13 +136,16 @@ class _LoginState extends State<Login> {
                           if (value == null || value.isEmpty) {
                             return 'Please enter your email';
                           }
+                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                            return 'Please enter a valid email';
+                          }
                           return null;
                         },
                       ),
                       const SizedBox(height: 20),
                       TextFormField(
                         controller: passwordController,
-                        obscureText: _obscureText,
+                        obscureText: _obscurePassword,
                         decoration: InputDecoration(
                           labelText: 'Password',
                           labelStyle: const TextStyle(color: Color(0xFFE91E63)),
@@ -102,12 +157,14 @@ class _LoginState extends State<Login> {
                           ),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscureText
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
+                              _obscurePassword ? Icons.visibility_off : Icons.visibility,
                               color: const Color(0xFFE91E63),
                             ),
-                            onPressed: _togglePasswordView,
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
                           ),
                         ),
                         validator: (value) {
@@ -117,7 +174,22 @@ class _LoginState extends State<Login> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 20),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: GestureDetector(
+                          onTap: _handleForgotPassword,
+                          child: Text(
+                            'Forgot Password?',
+                            style: GoogleFonts.lato(
+                              color: const Color(0xFFE91E63),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -128,76 +200,61 @@ class _LoginState extends State<Login> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          onPressed: () {
-                            Navigator.pushNamed(context, '/profiles');
-                          },
-
-                          child: Text(
-                            'Sign in',
-                            style: GoogleFonts.lato(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          onPressed: _isLoading
+                              ? null
+                              : () async {
+                                  if (_formKey.currentState!.validate()) {
+                                    setState(() {
+                                      _isLoading = true;
+                                    });
+                                    try {
+                                      final authService = AuthService();
+                                      await authService.loginWithEmailPassword(
+                                        emailController.text,
+                                        passwordController.text,
+                                      );
+                                      if (await authService.isEmailVerified()) {
+                                        Navigator.pushNamedAndRemoveUntil(
+                                          context,
+                                          '/profiles',
+                                          (route) => false,
+                                        );
+                                      } else {
+                                        await authService.signOut();
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Please verify your email before logging in. Check your inbox or spam folder.',
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            e.toString().replaceFirst('Exception: ', ''),
+                                          ),
+                                        ),
+                                      );
+                                    } finally {
+                                      setState(() {
+                                        _isLoading = false;
+                                      });
+                                    }
+                                  }
+                                },
+                          child: _isLoading
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : Text(
+                                  'Sign in',
+                                  style: GoogleFonts.lato(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'Forgot Password?',
-                        style: GoogleFonts.lato(
-                          color: const Color(0xFFE91E63),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        '- Or sign in with -',
-                        style: GoogleFonts.lato(
-                          color: const Color(0xFF757575),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: Divider(
-                              color: Color(0xFFE91E63),
-                              thickness: 2,
-                              endIndent: 10,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const FaIcon(
-                              FontAwesomeIcons.google,
-                              color: Color(0xFFE91E63),
-                            ),
-                            onPressed: () {},
-                          ),
-                          IconButton(
-                            icon: const FaIcon(
-                              FontAwesomeIcons.facebook,
-                              color: Color(0xFFE91E63),
-                            ),
-                            onPressed: () {},
-                          ),
-                          IconButton(
-                            icon: const FaIcon(
-                              FontAwesomeIcons.xTwitter,
-                              color: Color(0xFFE91E63),
-                            ),
-                            onPressed: () {},
-                          ),
-                          const Expanded(
-                            child: Divider(
-                              color: Color(0xFFE91E63),
-                              thickness: 2,
-                              indent: 10,
-                            ),
-                          ),
-                        ],
                       ),
                       const SizedBox(height: 10),
                       GestureDetector(

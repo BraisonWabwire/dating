@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'auth_service.dart';
 
 class Signup extends StatefulWidget {
   const Signup({super.key});
@@ -13,16 +13,18 @@ class _SignupState extends State<Signup> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
-  final TextEditingController confirmPasswordController =
-      TextEditingController();
   bool _obscurePassword = true;
-  bool _obscureConfirmPassword = true;
+  bool _isLoading = false;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFBDDD3),
-      appBar: AppBar(backgroundColor: const Color(0xFFFBDDD3), elevation: 0,  automaticallyImplyLeading: false,),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFBDDD3),
+        elevation: 0,
+        automaticallyImplyLeading: false,
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -65,19 +67,23 @@ class _SignupState extends State<Signup> {
                     children: [
                       TextFormField(
                         controller: emailController,
-                        decoration: InputDecoration(
+                        decoration: const InputDecoration(
                           labelText: 'Email',
-                          labelStyle: const TextStyle(color: Color(0xFFE91E63)),
-                          focusedBorder: const UnderlineInputBorder(
+                          labelStyle: TextStyle(color: Color(0xFFE91E63)),
+                          focusedBorder: UnderlineInputBorder(
                             borderSide: BorderSide(color: Color(0xFFE91E63)),
                           ),
-                          enabledBorder: const UnderlineInputBorder(
+                          enabledBorder: UnderlineInputBorder(
                             borderSide: BorderSide(color: Color(0xFF757575)),
                           ),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
                             return 'Please enter your email';
+                          }
+                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+                              .hasMatch(value)) {
+                            return 'Please enter a valid email';
                           }
                           return null;
                         },
@@ -113,43 +119,8 @@ class _SignupState extends State<Signup> {
                           if (value == null || value.isEmpty) {
                             return 'Please enter a password';
                           }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      TextFormField(
-                        controller: confirmPasswordController,
-                        obscureText: _obscureConfirmPassword,
-                        decoration: InputDecoration(
-                          labelText: 'Confirm Password',
-                          labelStyle: const TextStyle(color: Color(0xFFE91E63)),
-                          focusedBorder: const UnderlineInputBorder(
-                            borderSide: BorderSide(color: Color(0xFFE91E63)),
-                          ),
-                          enabledBorder: const UnderlineInputBorder(
-                            borderSide: BorderSide(color: Color(0xFF757575)),
-                          ),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureConfirmPassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: const Color(0xFFE91E63),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _obscureConfirmPassword =
-                                    !_obscureConfirmPassword;
-                              });
-                            },
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please confirm your password';
-                          }
-                          if (value != passwordController.text) {
-                            return 'Passwords do not match';
+                          if (value.length < 6) {
+                            return 'Password must be at least 6 characters';
                           }
                           return null;
                         },
@@ -161,66 +132,66 @@ class _SignupState extends State<Signup> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFFE91E63),
                             padding: const EdgeInsets.symmetric(vertical: 15),
-                            shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(10),
-                              ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          onPressed: () {
-                            if (_formKey.currentState!.validate()) {
-                              // Sign up logic here
-                            }
-                          },
-                          child: Text(
-                            'Sign up',
-                            style: GoogleFonts.lato(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          onPressed: _isLoading
+                              ? null
+                              : () async {
+                                  if (_formKey.currentState!.validate()) {
+                                    setState(() {
+                                      _isLoading = true;
+                                    });
+                                    try {
+                                      final authService = AuthService();
+                                      await authService.signUpWithEmailPassword(
+                                        emailController.text,
+                                        passwordController.text,
+                                      );
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Registration successful! A verification email has been sent. Please check your inbox or spam folder.',
+                                          ),
+                                        ),
+                                      );
+                                      Navigator.pushNamedAndRemoveUntil(
+                                        context,
+                                        '/email_verification',
+                                        (route) => false,
+                                      );
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            e.toString().replaceFirst('Exception: ', ''),
+                                          ),
+                                        ),
+                                      );
+                                    } finally {
+                                      setState(() {
+                                        _isLoading = false;
+                                      });
+                                    }
+                                  }
+                                },
+                          child: _isLoading
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : Text(
+                                  'Sign up',
+                                  style: GoogleFonts.lato(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        '- Or sign up with -',
-                        style: GoogleFonts.lato(
-                          color: const Color(0xFF757575),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            icon: const FaIcon(
-                              FontAwesomeIcons.google,
-                              color: Color(0xFFE91E63),
-                            ),
-                            onPressed: () {},
-                          ),
-                          IconButton(
-                            icon: const FaIcon(
-                              FontAwesomeIcons.facebook,
-                              color: Color(0xFFE91E63),
-                            ),
-                            onPressed: () {},
-                          ),
-                          IconButton(
-                            icon: const FaIcon(
-                              FontAwesomeIcons.xTwitter,
-                              color: Color(0xFFE91E63),
-                            ),
-                            onPressed: () {},
-                          ),
-                        ],
                       ),
                       const SizedBox(height: 10),
                       GestureDetector(
                         onTap: () {
-                         Navigator.pushNamed(context, '/login');
+                          Navigator.pushNamed(context, '/login');
                         },
                         child: const Text(
                           "Already have an account? Sign in",
@@ -230,7 +201,6 @@ class _SignupState extends State<Signup> {
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 30),
                     ],
                   ),

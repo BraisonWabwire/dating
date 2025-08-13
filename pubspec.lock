@@ -26,7 +26,7 @@ packages:
     source: hosted
     version: "2.1.2"
   card_swiper:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: card_swiper
       sha256: "21e52a144decbf0054e7cfed8bbe46fc89635e6c86b767eaccfe7d5aeba32528"
@@ -130,7 +130,7 @@ packages:
     source: hosted
     version: "0.9.3+4"
   firebase_auth:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: firebase_auth
       sha256: abd15b7287285390c4ac144fed7825a1877496366e0d15ffc0ddfa9774deb3f3
@@ -209,7 +209,7 @@ packages:
     source: sdk
     version: "0.0.0"
   font_awesome_flutter:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: font_awesome_flutter
       sha256: f50ce90dbe26d977415b9540400d6778bef00894aced6358ae578abd92b14b10
@@ -217,7 +217,7 @@ packages:
     source: hosted
     version: "10.9.0"
   google_fonts:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: google_fonts
       sha256: df9763500dadba0155373e9cb44e202ce21bd9ed5de6bdbd05c5854e86839cb8
@@ -233,7 +233,7 @@ packages:
     source: hosted
     version: "0.3.3+1"
   google_sign_in:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: google_sign_in
       sha256: "939a8b58f84c4053811b8c1bc9adbcb59449a15b37958264bbf60020698cca0e"
@@ -289,7 +289,7 @@ packages:
     source: hosted
     version: "4.1.2"
   image_picker:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: image_picker
       sha256: "021834d9c0c3de46bf0fe40341fa07168407f694d9b2bb18d532dc1261867f7a"
@@ -473,7 +473,7 @@ packages:
     source: hosted
     version: "2.3.0"
   permission_handler:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: permission_handler
       sha256: bc917da36261b00137bbc8896bf1482169cd76f866282368948f032c8c1caae1

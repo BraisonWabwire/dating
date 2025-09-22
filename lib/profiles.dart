@@ -1,4 +1,4 @@
-import 'package:dating/auth_service.dart';
+import 'package:dating/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:card_swiper/card_swiper.dart';
 
@@ -34,7 +34,7 @@ class _ProfilesState extends State<Profiles> {
       appBar: AppBar(
         title: Text(
           'Swipe For A Match',
-          style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold, color: Colors.white),
         ),
         backgroundColor: const Color(0xFFE91E63),
         centerTitle: true,

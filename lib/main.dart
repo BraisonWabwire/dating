@@ -8,7 +8,7 @@ import 'package:dating/signup.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
-import 'auth_service.dart';
+import 'services/auth_service.dart';
 import 'firebase_options.dart';
 
 void main() async {

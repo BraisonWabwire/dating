@@ -1,37 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  // Check if email exists using sendPasswordResetEmail
-  Future<bool> checkEmailExists(String email) async {
-    try {
-      await _auth.sendPasswordResetEmail(email: email.trim());
-      if (kDebugMode) {
-        print('Email check for $email: exists (password reset email sent)');
-      }
-      return true; // Email exists if no error is thrown
-    } on FirebaseAuthException catch (e) {
-      if (kDebugMode) {
-        print('Email check error for $email: ${e.code} - ${e.message}');
-      }
-      if (e.code == 'user-not-found') {
-        return false; // Email does not exist
-      } else if (e.code == 'invalid-email') {
-        throw Exception('The email address is invalid.');
-      } else if (e.code == 'too-many-requests') {
-        throw Exception('Too many attempts. Please try again later.');
-      } else {
-        throw Exception(_handleAuthException(e));
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('Unexpected error checking email: $e');
-      }
-      throw Exception('Failed to check email: $e');
-    }
-  }
 
   // Sign up with email and password
   Future<User?> signUpWithEmailPassword(String email, String password) async {
@@ -41,17 +11,14 @@ class AuthService {
         email: email.trim(),
         password: password.trim(),
       );
+
+      // Send verification email
       if (userCredential.user != null && !userCredential.user!.emailVerified) {
         await userCredential.user!.sendEmailVerification();
-        if (kDebugMode) {
-          print('Verification email sent to ${userCredential.user!.email}');
-        }
       }
+
       return userCredential.user;
     } on FirebaseAuthException catch (e) {
-      if (kDebugMode) {
-        print('Signup error: ${e.code} - ${e.message}');
-      }
       throw Exception(_handleAuthException(e));
     }
   }
@@ -64,57 +31,31 @@ class AuthService {
         email: email.trim(),
         password: password.trim(),
       );
+
       if (userCredential.user != null) {
         await userCredential.user!.reload();
         if (!userCredential.user!.emailVerified) {
-          if (kDebugMode) {
-            print('User ${userCredential.user!.email} attempted login but email is not verified');
-          }
-          await _auth.signOut();
           throw Exception('Please verify your email before logging in.');
         }
-        if (kDebugMode) {
-          print('User logged in: ${userCredential.user?.email}, Verified: ${userCredential.user?.emailVerified}');
-        }
-        return userCredential.user;
       }
-      return null;
+
+      return userCredential.user;
     } on FirebaseAuthException catch (e) {
-      if (kDebugMode) {
-        print('Login error: ${e.code} - ${e.message}');
-      }
       throw Exception(_handleAuthException(e));
     }
   }
 
-  // Reset password
   Future<void> resetPassword(String email) async {
-    try {
-      await _auth.sendPasswordResetEmail(email: email.trim());
-      if (kDebugMode) {
-        print('Password reset email sent to $email');
-      }
-    } on FirebaseAuthException catch (e) {
-      if (kDebugMode) {
-        print('Password reset error: ${e.code} - ${e.message}');
-      }
-      throw Exception(_handleAuthException(e));
-    }
+  try {
+    await _auth.sendPasswordResetEmail(email: email);
+  } on FirebaseAuthException catch (e) {
+    throw Exception(_handleAuthException(e));
   }
+}
 
   // Sign out
   Future<void> signOut() async {
-    try {
-      await _auth.signOut();
-      if (kDebugMode) {
-        print('User signed out');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('Sign out error: $e');
-      }
-      throw Exception('Failed to sign out: $e');
-    }
+    await _auth.signOut();
   }
 
   // Handle FirebaseAuth exceptions
@@ -130,43 +71,8 @@ class AuthService {
         return 'No user found for that email.';
       case 'wrong-password':
         return 'Incorrect password.';
-      case 'user-disabled':
-        return 'This user account has been disabled.';
-      case 'invalid-credential':
-        return 'Invalid credentials provided.';
-      case 'too-many-requests':
-        return 'Too many attempts. Please try again later.';
       default:
         return 'An error occurred: ${e.message}';
     }
-  }
-
-  // Get current user
-  User? getCurrentUser() {
-    final user = _auth.currentUser;
-    if (kDebugMode) {
-      print('Current user: ${user?.email}, Verified: ${user?.emailVerified}');
-    }
-    return user;
-  }
-
-  // Check if email is verified
-  Future<bool> isEmailVerified() async {
-    final user = _auth.currentUser;
-    if (user != null) {
-      try {
-        await user.reload();
-        if (kDebugMode) {
-          print('Email verification check for ${user.email}: ${user.emailVerified}');
-        }
-        return user.emailVerified;
-      } catch (e) {
-        if (kDebugMode) {
-          print('Error checking email verification: $e');
-        }
-        return false;
-      }
-    }
-    return false;
   }
 }

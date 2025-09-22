@@ -139,16 +139,6 @@ class _SignupState extends State<Signup> {
                                     });
                                     try {
                                       final authService = AuthService();
-                                      // Check if email exists
-                                      final emailExists = await authService.checkEmailExists(emailController.text);
-                                      if (emailExists) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('This email is already registered. Please log in.'),
-                                          ),
-                                        );
-                                        return;
-                                      }
                                       // Proceed with signup
                                       final user = await authService.signUpWithEmailPassword(
                                         emailController.text,

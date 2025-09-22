@@ -1,7 +1,5 @@
 import 'package:dating/chat_page.dart';
 import 'package:dating/profiles.dart';
-import 'package:dating/update_profile.dart';
-import 'package:dating/email_verification_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:dating/welcome_screen.dart';
 import 'package:dating/login.dart';
@@ -18,12 +16,18 @@ void main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    await FirebaseAuth.instance.setPersistence(
-      kIsWeb ? Persistence.SESSION : Persistence.LOCAL,
-    );
-    if (kDebugMode) {
-      print('Firebase initialized, persistence set to ${kIsWeb ? "SESSION" : "LOCAL"}');
+
+    if (kIsWeb) {
+      await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
+      if (kDebugMode) {
+        print('Firebase initialized (web) with SESSION persistence');
+      }
+    } else {
+      if (kDebugMode) {
+        print('Firebase initialized (mobile) with default persistence');
+      }
     }
+
     runApp(const MyApp());
   } catch (e) {
     if (kDebugMode) {
@@ -49,13 +53,11 @@ class MyApp extends StatelessWidget {
       title: 'Dating App',
       home: const AuthWrapper(),
       routes: {
-        '/': (context) => const WelcomeScreen(),
+        '/welcome': (context) => const WelcomeScreen(),
         '/login': (context) => const Login(),
         '/signup': (context) => const Signup(),
         '/profiles': (context) => const Profiles(),
         '/Chat_page': (context) => const ChatPage(),
-        '/update_profile': (context) => const UpdateProfile(),
-        '/email_verification': (context) => const EmailVerificationScreen(),
       },
     );
   }
@@ -69,60 +71,35 @@ class AuthWrapper extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (kDebugMode) {
-          print('Auth state: connection=${snapshot.connectionState}, user=${snapshot.data?.email}');
-        }
+        // Still loading
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        if (snapshot.hasError) {
+
+        // No user logged in
+        if (!snapshot.hasData) {
           if (kDebugMode) {
-            print('Auth state error: ${snapshot.error}');
+            print('No user found → Welcome Screen');
+          }
+          return const WelcomeScreen();
+        }
+
+        final user = snapshot.data!;
+        if (!user.emailVerified) {
+          if (kDebugMode) {
+            print('User ${user.email} not verified → Ask for verification');
           }
           return const Scaffold(
-            body: Center(child: Text('Error loading authentication state')),
+            body: Center(child: Text('Please verify your email to continue.')),
           );
         }
-        if (snapshot.hasData && snapshot.data != null) {
-          return FutureBuilder<bool>(
-            future: AuthService().isEmailVerified(),
-            builder: (context, emailSnapshot) {
-              if (kDebugMode) {
-                print('Email verification state: ${emailSnapshot.data}, error: ${emailSnapshot.error}');
-              }
-              if (emailSnapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (emailSnapshot.hasError) {
-                if (kDebugMode) {
-                  print('Email verification error: ${emailSnapshot.error}');
-                }
-                return const Scaffold(
-                  body: Center(child: Text('Error checking email verification')),
-                );
-              }
-              if (emailSnapshot.hasData && emailSnapshot.data == true) {
-                if (kDebugMode) {
-                  print('Redirecting to Profiles for verified user: ${snapshot.data!.email}');
-                }
-                return const Profiles();
-              } else {
-                if (kDebugMode) {
-                  print('Redirecting to EmailVerificationScreen for unverified user: ${snapshot.data!.email}');
-                }
-                return const EmailVerificationScreen();
-              }
-            },
-          );
-        }
+
         if (kDebugMode) {
-          print('No user logged in, redirecting to WelcomeScreen');
+          print('User ${user.email} logged in & verified → Profiles');
         }
-        return const WelcomeScreen();
+        return const Profiles();
       },
     );
   }

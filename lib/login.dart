@@ -209,17 +209,6 @@ class _LoginState extends State<Login> {
                                     });
                                     try {
                                       final authService = AuthService();
-                                      // Check if email exists
-                                      final emailExists = await authService.checkEmailExists(emailController.text);
-                                      if (!emailExists) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('No account found with this email. Please sign up.'),
-                                          ),
-                                        );
-                                        return;
-                                      }
-                                      // Attempt login
                                       await authService.loginWithEmailPassword(
                                         emailController.text,
                                         passwordController.text,

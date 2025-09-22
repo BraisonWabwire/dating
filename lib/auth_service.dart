@@ -53,6 +53,24 @@ class AuthService {
   }
 }
 
+Future<bool> isEmailVerified() async {
+  final user = _auth.currentUser;
+  if (user != null) {
+    try {
+      await user.reload();
+      return user.emailVerified;
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
+}
+
+// Get current user
+User? getCurrentUser() {
+  return _auth.currentUser;
+}
+
   // Sign out
   Future<void> signOut() async {
     await _auth.signOut();

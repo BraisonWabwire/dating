@@ -1,5 +1,6 @@
 import 'package:dating/chat_page.dart';
 import 'package:dating/profiles.dart';
+import 'package:dating/update_profile.dart';
 import 'package:flutter/material.dart';
 import 'package:dating/welcome_screen.dart';
 import 'package:dating/login.dart';
@@ -58,6 +59,7 @@ class MyApp extends StatelessWidget {
         '/signup': (context) => const Signup(),
         '/profiles': (context) => const Profiles(),
         '/Chat_page': (context) => const ChatPage(),
+        '/update_profile': (context) => const UpdateProfile(),
       },
     );
   }

@@ -1,96 +1,233 @@
-import 'package:dating/services/auth_service.dart';
-import 'package:dating/services/profile_service.dart';
 import 'package:flutter/material.dart';
-import 'package:card_swiper/card_swiper.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:geolocator/geolocator.dart';
+import 'services/profile_service.dart';
 
 class UpdateProfile extends StatefulWidget {
   const UpdateProfile({super.key});
 
   @override
-  State<UpdateProfile> createState() => _ProfilesState();
+  State<UpdateProfile> createState() => _UpdateProfileState();
 }
 
-class _ProfilesState extends State<UpdateProfile> {
-  final AuthService _authService = AuthService();
-  final ProfileService _profileService = ProfileService();
-  final SwiperController _swiperController = SwiperController();
+class _UpdateProfileState extends State<UpdateProfile> {
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _firstNameController = TextEditingController();
+  final TextEditingController _lastNameController = TextEditingController();
+  final TextEditingController _bioController = TextEditingController();
+  // Keep city controller for backend storage, but don't show it in UI
+  final TextEditingController _cityController = TextEditingController();
   
-  List<Map<String, dynamic>> profiles = [];
-  bool isLoading = true;
-  String? currentUserId;
+  List<File?> _images = [null, null, null];
+  final ImagePicker _picker = ImagePicker();
+  
+  // Profile service instance
+  final ProfileService _profileService = ProfileService();
+  
+  // Relationship goals options
+  final List<String> _relationshipGoals = [
+    'Long term',
+    'Short term',
+    'find love'
+  ];
+  String? _selectedGoal;
+
+  // Loading states
+  bool _isLoading = false;
+  bool _isGettingLocation = false;
+  bool _hasLocationPermission = false;
+
+  // Location data
+  Map<String, dynamic>? _currentLocationWithCity;
 
   @override
   void initState() {
     super.initState();
-    _loadCurrentUserAndProfiles();
+    _requestPermissions();
+    _loadCurrentProfile();
+    // Automatically get location after permissions are requested
+    _initializeLocation();
   }
 
-  // Load current user and fetch profiles
-  Future<void> _loadCurrentUserAndProfiles() async {
-    try {
-      setState(() {
-        isLoading = true;
-      });
+  // Initialize location automatically
+  Future<void> _initializeLocation() async {
+    await Future.delayed(const Duration(milliseconds: 500)); // Small delay to ensure permissions are set
+    await _getCurrentLocation();
+  }
 
-      currentUserId = _authService.currentUser?.uid;
-      debugPrint('Current user ID: $currentUserId');
-
-      if (currentUserId != null) {
-        await _fetchUserProfiles();
+  // Load current profile data
+  Future<void> _loadCurrentProfile() async {
+    final userId = _profileService.currentUserId;
+    if (userId != null) {
+      final profile = await _profileService.getUserProfile(userId);
+      if (profile != null && mounted) {
+        setState(() {
+          _firstNameController.text = profile['firstName'] ?? '';
+          _lastNameController.text = profile['lastName'] ?? '';
+          _bioController.text = profile['bio'] ?? '';
+          _cityController.text = profile['city'] ?? ''; // Load existing city for backend
+          _selectedGoal = profile['relationshipGoal'];
+          
+          // Load existing location
+          if (profile['location'] != null) {
+            _currentLocationWithCity = {
+              'latitude': profile['location']['latitude'].toDouble(),
+              'longitude': profile['location']['longitude'].toDouble(),
+              'city': profile['city'] ?? 'Unknown City',
+            };
+          }
+        });
       }
-    } catch (e) {
-      debugPrint('Error loading profiles: $e');
+    }
+  }
+
+  Future<void> _requestPermissions() async {
+    // Request existing permissions
+    await [Permission.camera, Permission.storage].request();
+    
+    // Check and request location permission automatically
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (serviceEnabled) {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      setState(() {
+        _hasLocationPermission = permission == LocationPermission.whileInUse ||
+                                 permission == LocationPermission.always;
+      });
+    } else {
+      // If location services are disabled, show a subtle message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading profiles: $e'),
-            backgroundColor: Colors.red,
+          const SnackBar(
+            content: Text('Location services are disabled. Some features may not work properly.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    // Only get location if we have permission
+    if (!_hasLocationPermission) {
+      return;
+    }
+
+    setState(() {
+      _isGettingLocation = true;
+    });
+
+    try {
+      // Get location with city name
+      final locationWithCity = await _profileService.getCurrentLocationWithCity();
+      if (locationWithCity != null && mounted) {
+        setState(() {
+          _currentLocationWithCity = locationWithCity;
+          // Update city controller for backend storage
+          _cityController.text = locationWithCity['city'] ?? 'Unknown City';
+        });
+        
+        // Optional: Show success message (you can remove this if you don't want any feedback)
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Location automatically detected'),
+              backgroundColor: Color(0xFF4CAF50),
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Background location error: $e');
+      // Don't show error to user since it's automatic
     } finally {
       if (mounted) {
         setState(() {
-          isLoading = false;
+          _isGettingLocation = false;
         });
       }
     }
   }
 
-  // Fetch user profiles with matching criteria
-  Future<void> _fetchUserProfiles() async {
-    try {
-      debugPrint('Fetching user profiles from Firestore...');
-      
-      final userProfiles = await _profileService.getAllUsersForSwiping(
-        limit: 50,
-        includeDistanceFilter: true,
-        maxDistance: 100.0,
-      );
-
-      debugPrint('Loaded ${userProfiles.length} matching profiles');
-      
-      if (mounted) {
+  Future<void> _pickImage(int index) async {
+    if (await Permission.camera.isGranted && await Permission.storage.isGranted) {
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+      if (image != null) {
         setState(() {
-          profiles = userProfiles;
+          _images[index] = File(image.path);
         });
       }
-    } catch (e) {
-      debugPrint('Error fetching profiles: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load profiles: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+    } else {
+      await [Permission.camera, Permission.storage].request();
     }
   }
 
-  // Refresh profiles
-  Future<void> _refreshProfiles() async {
-    await _loadCurrentUserAndProfiles();
+  // Updated save profile method
+  Future<void> _saveProfile() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+      });
+
+      try {
+        final success = await _profileService.saveProfile(
+          firstName: _firstNameController.text.trim(),
+          lastName: _lastNameController.text.trim(),
+          bio: _bioController.text.trim(),
+          relationshipGoal: _selectedGoal ?? '',
+          images: _images,
+          locationWithCity: _currentLocationWithCity, // Pass location with city data
+          city: _cityController.text.trim(), // Pass city from controller (auto-filled)
+        );
+
+        if (success) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Profile updated successfully!'),
+                backgroundColor: Color(0xFF4CAF50),
+                duration: Duration(seconds: 2),
+              ),
+            );
+            // Navigate back after successful save
+            Navigator.pop(context);
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to update profile. Please try again.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    }
   }
 
   @override
@@ -98,681 +235,489 @@ class _ProfilesState extends State<UpdateProfile> {
     return Scaffold(
       backgroundColor: const Color(0xFFF06292),
       appBar: AppBar(
-        title: const Text(
-          'Swipe For A Match',
-          style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold, color: Colors.white),
-        ),
-        backgroundColor: const Color(0xFFE91E63),
-        centerTitle: true,
+        backgroundColor: const Color(0xFFF06292),
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            tooltip: 'Refresh Profiles',
-            onPressed: _refreshProfiles,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          'Update Profile',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
           ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            tooltip: 'Log out',
-            onPressed: () async {
-              try {
-                await _authService.signOut();
-                if (mounted) {
-                  Navigator.pushNamedAndRemoveUntil(
-                    context,
-                    '/login',
-                    (route) => false,
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Logout failed: $e')),
-                  );
-                }
-              }
-            },
-          ),
-        ],
+        ),
+        centerTitle: true,
       ),
-      body: profiles.isEmpty && !isLoading
-          ? _buildEmptyState()
-          : RefreshIndicator(
-              onRefresh: _refreshProfiles,
-              color: const Color(0xFFE91E63),
-              child: Stack(
-                children: [
-                  Column(
-                    children: [
-                      if (isLoading)
-                        Expanded(
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Color(0xFFF06292),
-                                  Color(0xFFE91E63),
-                                  Color(0xFFAD1457),
-                                ],
-                              ),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
+          : Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFFF06292),
+                    Color(0xFFE91E63),
+                    Color(0xFFAD1457),
+                  ],
+                ),
+              ),
+              child: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Profile Images Section
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.2),
+                              width: 1,
                             ),
-                            child: const Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  CircularProgressIndicator(
-                                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE91E63)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Profile Images (Up to 3)',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 15),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: List.generate(3, (index) {
+                                  return GestureDetector(
+                                    onTap: () => _pickImage(index),
+                                    child: Container(
+                                      width: 90,
+                                      height: 90,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: .15),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: Colors.white.withOpacity(0.3),
+                                          width: 2,
+                                        ),
+                                        image: _images[index] != null
+                                            ? DecorationImage(
+                                                image: FileImage(_images[index]!),
+                                                fit: BoxFit.cover,
+                                              )
+                                            : null,
+                                      ),
+                                      child: _images[index] == null
+                                          ? Column(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                Icon(
+                                                  Icons.add_a_photo,
+                                                  color: Colors.white.withOpacity(0.7),
+                                                  size: 30,
+                                                ),
+                                                const SizedBox(height: 5),
+                                                Text(
+                                                  'Photo ${index + 1}',
+                                                  style: TextStyle(
+                                                    color: Colors.white.withOpacity(0.7),
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
+                                            )
+                                          : null,
+                                    ),
+                                  );
+                                }),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 25),
+
+                        // Form Fields Section
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF06292),
+                            borderRadius: BorderRadius.circular(15),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 10,
+                                offset: const Offset(0, 5),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Personal Information',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+
+                              // First Name
+                              TextFormField(
+                                controller: _firstNameController,
+                                decoration: InputDecoration(
+                                  labelText: 'First Name',
+                                  labelStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
                                   ),
-                                  SizedBox(height: 16),
-                                  Text(
-                                    'Loading profiles...',
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 16,
+                                  hintText: 'Enter your first name',
+                                  hintStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  prefixIcon: const Icon(
+                                    Icons.person_outline,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF06292),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey[300]!,
+                                      width: 1,
                                     ),
                                   ),
-                                ],
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey[300]!,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  errorBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  focusedErrorBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 16,
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please enter your first name';
+                                  }
+                                  if (value.length < 2) {
+                                    return 'First name must be at least 2 characters';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Last Name
+                              TextFormField(
+                                controller: _lastNameController,
+                                decoration: InputDecoration(
+                                  labelText: 'Last Name',
+                                  labelStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  hintText: 'Enter your last name',
+                                  hintStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  prefixIcon: const Icon(
+                                    Icons.person_outline,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF06292),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey[300]!,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey[300]!,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  errorBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  focusedErrorBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 16,
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please enter your last name';
+                                  }
+                                  if (value.length < 2) {
+                                    return 'Last name must be at least 2 characters';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Relationship Goals Section
+                              Text(
+                                'What are you looking for?',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: _relationshipGoals.map((goal) {
+                                  bool isSelected = _selectedGoal == goal;
+                                  return GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedGoal = goal;
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isSelected 
+                                            ? Colors.white.withOpacity(0.2)
+                                            : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: isSelected 
+                                              ? Colors.white
+                                              : Colors.white.withOpacity(0.3),
+                                          width: isSelected ? 2 : 1,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        goal,
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: isSelected 
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Bio
+                              TextFormField(
+                                controller: _bioController,
+                                decoration: InputDecoration(
+                                  labelText: 'Bio',
+                                  labelStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  hintText: 'Tell us about yourself',
+                                  hintStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  prefixIcon: const Icon(
+                                    Icons.description_outlined,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF06292),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey[300]!,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey[300]!,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  errorBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  focusedErrorBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 16,
+                                  ),
+                                ),
+                                maxLines: 4,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please enter your bio';
+                                  }
+                                  if (value.length < 10) {
+                                    return 'Bio must be at least 10 characters';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 25),
+
+                        // Save Profile Button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 55,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color.fromARGB(255, 228, 55, 113),
+                              foregroundColor: Colors.white,
+                              elevation: 3,
+                              shadowColor: Colors.black.withValues(alpha: 0.2),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(15),
                               ),
                             ),
+                            onPressed: _isLoading ? null : _saveProfile,
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  )
+                                : const Text(
+                                    'Save Profile',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
                           ),
-                        )
-                      else
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 20),
-                            child: Swiper(
-                              controller: _swiperController,
-                              itemCount: profiles.length,
-                              itemBuilder: (BuildContext context, int index) {
-                                final profile = profiles[index];
-                                return _buildProfileCard(profile);
-                              },
-                              itemWidth: MediaQuery.of(context).size.width * 0.9,
-                              itemHeight: MediaQuery.of(context).size.height * 0.65,
-                              layout: SwiperLayout.STACK,
-                              onIndexChanged: (index) {
-                                debugPrint('Swiped to profile ${index + 1}/${profiles.length}');
-                              },
-                              onTap: (index) {
-                                _showProfileDetails(profiles[index]);
-                              },
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  if (!isLoading && profiles.isNotEmpty)
-                    Positioned(
-                      bottom: 20,
-                      left: 20,
-                      right: 20,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _buildActionButton(
-                            icon: Icons.close,
-                            color: Colors.red,
-                            onPressed: () => _onSwipe(0, 'reject'),
-                          ),
-                          _buildActionButton(
-                            icon: Icons.favorite,
-                            color: const Color(0xFFF06292),
-                            onPressed: () => _onSwipe(0, 'like'),
-                          ),
-                          _buildActionButton(
-                            icon: Icons.mail_outline,
-                            color: const Color(0xFFF06292),
-                            onPressed: () => _onSwipe(0, 'message'),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-      
-      bottomNavigationBar: BottomAppBar(
-        color: const Color(0xFFE91E63),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 5),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              GestureDetector(
-                onTap: () {
-                  Navigator.pushNamed(context, '/update_profile');
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.person, color: Colors.white, size: 30),
-                    Text(
-                      "Profile",
-                      style: TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              GestureDetector(
-                onTap: () {
-                  Navigator.pushNamed(context, '/likes');
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.favorite, color: Colors.white, size: 30),
-                    Text(
-                      "Likes",
-                      style: TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              GestureDetector(
-                onTap: () {
-                  Navigator.pushNamed(context, '/chats');
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.chat, color: Colors.white, size: 30),
-                    Text(
-                      "Chats",
-                      style: TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              GestureDetector(
-                onTap: () {
-                  Navigator.pushNamed(context, '/search');
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.search, color: Colors.white, size: 30),
-                    Text(
-                      "Search",
-                      style: TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Build empty state
-  Widget _buildEmptyState() {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFFF06292),
-            Color(0xFFE91E63),
-            Color(0xFFAD1457),
-          ],
-        ),
-      ),
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.inbox_outlined, size: 64, color: Colors.white54),
-            SizedBox(height: 16),
-            Text(
-              'No profiles available',
-              style: TextStyle(fontSize: 18, color: Colors.white70),
-            ),
-            SizedBox(height: 8),
-            Text(
-              'Pull down to refresh or complete your profile',
-              style: TextStyle(fontSize: 14, color: Colors.white54),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Build profile card
-  Widget _buildProfileCard(Map<String, dynamic> profile) {
-    return Card(
-      elevation: 8,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: _buildProfileImage(profile['images']?.isNotEmpty == true ? profile['images'][0] : 'https://i.pravatar.cc/300'),
-          ),
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [
-                  const Color.fromRGBO(0, 0, 0, 0.7),
-                  Colors.transparent,
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 20,
-            left: 20,
-            right: 20,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        profile['name'] ?? 'Unknown',
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (profile['city'] != null && profile['city'] != 'Unknown')
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          profile['city'],
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  profile['bio'] ?? '',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.white,
-                    height: 1.3,
-                  ),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                if (profile['relationshipGoal']?.isNotEmpty == true)
-                  Text(
-                    'Looking for: ${profile['relationshipGoal']}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.white70,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                if (profile['distance'] != null && (profile['distance'] as double) < 100)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      '${profile['distance']?.toStringAsFixed(1)} km away',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white54,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Build profile image with error handling
-  Widget _buildProfileImage(String imageUrl) {
-    return Image.network(
-      imageUrl,
-      fit: BoxFit.cover,
-      width: double.infinity,
-      height: double.infinity,
-      errorBuilder: (context, error, stackTrace) {
-        return Container(
-          width: double.infinity,
-          height: double.infinity,
-          decoration: BoxDecoration(
-            color: Colors.grey[300],
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: const Icon(
-            Icons.person,
-            size: 80,
-            color: Colors.grey,
-          ),
-        );
-      },
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) return child;
-        return Container(
-          width: double.infinity,
-          height: double.infinity,
-          decoration: BoxDecoration(
-            color: Colors.grey[200],
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: const Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE91E63)),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // Build action button
-  Widget _buildActionButton({
-    required IconData icon,
-    required Color color,
-    required VoidCallback onPressed,
-  }) {
-    return ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        shape: const CircleBorder(),
-        padding: const EdgeInsets.all(16),
-        elevation: 4,
-      ),
-      child: Icon(
-        icon,
-        color: Colors.white,
-        size: 30,
-      ),
-    );
-  }
-
-  // Handle swipe actions
-  void _onSwipe(int index, String action) {
-    if (profiles.isEmpty) return;
-
-    final profile = profiles[index];
-    final userId = profile['id'];
-    
-    debugPrint('Action "$action" on user: $userId');
-
-    switch (action) {
-      case 'like':
-        _handleLike(userId, profile);
-        break;
-      case 'reject':
-        _handleReject(userId, profile);
-        break;
-      case 'message':
-        _handleMessage(userId, profile);
-        break;
-    }
-  }
-
-  // Handle like action
-  Future<void> _handleLike(String userId, Map<String, dynamic> profile) async {
-    try {
-      if (currentUserId == null) return;
-
-      final success = await _profileService.saveLike(userId);
-      if (!success) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Failed to like profile'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      final mutualLike = await _profileService.checkMutualLike(userId);
-      
-      if (mutualLike) {
-        await _profileService.createMatch(userId);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('It\'s a match with ${profile['name']}!'),
-              backgroundColor: const Color(0xFFF06292),
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('You liked ${profile['name']}!'),
-              backgroundColor: const Color(0xFFF06292),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-      }
-      
-      if (_swiperController.index < profiles.length - 1) {
-        _swiperController.next();
-      } else {
-        setState(() {
-          profiles.removeAt(0);
-        });
-      }
-      
-    } catch (e) {
-      debugPrint('Error handling like: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error liking profile: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  // Handle reject action
-  Future<void> _handleReject(String userId, Map<String, dynamic> profile) async {
-    try {
-      debugPrint('Rejected user: $userId');
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Profile skipped'),
-            backgroundColor: Colors.grey,
-            duration: Duration(seconds: 1),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      
-      if (_swiperController.index < profiles.length - 1) {
-        _swiperController.next();
-      } else {
-        setState(() {
-          profiles.removeAt(0);
-        });
-      }
-      
-    } catch (e) {
-      debugPrint('Error handling reject: $e');
-    }
-  }
-
-  // Handle message action
-  Future<void> _handleMessage(String userId, Map<String, dynamic> profile) async {
-    try {
-      debugPrint('Message user: $userId');
-      
-      final mutualLike = await _profileService.checkMutualLike(userId);
-      if (!mutualLike) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('You need to match before messaging'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      if (mounted) {
-        Navigator.pushNamed(
-          context,
-          '/chat',
-          arguments: {
-            'userId': userId,
-            'userName': profile['name'],
-            'userProfile': profile['fullProfile'],
-          },
-        );
-      }
-    } catch (e) {
-      debugPrint('Error handling message: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error starting chat: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  // Show profile details on tap
-  void _showProfileDetails(Map<String, dynamic> profile) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFFF06292),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Row(
-            children: [
-              CircleAvatar(
-                radius: 20,
-                backgroundImage: NetworkImage(
-                  profile['images']?.isNotEmpty == true 
-                    ? profile['images'][0] 
-                    : 'https://i.pravatar.cc/300',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  profile['name'] ?? 'Unknown',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  profile['bio'] ?? '',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 12),
-                if (profile['city'] != null)
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on, color: Colors.white54, size: 16),
-                      const SizedBox(width: 4),
-                      Text(
-                        'From ${profile['city']}',
-                        style: const TextStyle(color: Colors.white54),
-                      ),
-                    ],
-                  ),
-                if (profile['relationshipGoal'] != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.favorite, color: Colors.white54, size: 16),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Looking for: ${profile['relationshipGoal']}',
-                          style: const TextStyle(color: Colors.white54),
                         ),
                       ],
                     ),
                   ),
-                if (profile['distance'] != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.map, color: Colors.white54, size: 16),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${profile['distance']?.toStringAsFixed(1)} km away',
-                          style: const TextStyle(color: Colors.white54),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close', style: TextStyle(color: Colors.white)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _onSwipe(0, 'like');
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFFE91E63),
+                ),
               ),
-              child: const Text('Like'),
             ),
-          ],
-        );
-      },
     );
+  }
+
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _bioController.dispose();
+    _cityController.dispose(); // Keep this for backend storage
+    super.dispose();
   }
 }

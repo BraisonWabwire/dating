@@ -1,10 +1,11 @@
 import 'dart:io';
+import 'dart:math'; // Added for sin, cos, sqrt, asin
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart'; // Add this import
+import 'package:geocoding/geocoding.dart';
 
 class ProfileService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -73,7 +74,7 @@ class ProfileService {
   // Upload single image to Firebase Storage
   Future<String?> _uploadImage(File imageFile, String userId) async {
     try {
-      final fileName = 'profile_images/${userId}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final fileName = 'profile_images/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
       final ref = _storage.ref().child(fileName);
       final uploadTask = ref.putFile(imageFile);
       final snapshot = await uploadTask;
@@ -108,8 +109,8 @@ class ProfileService {
     required String bio,
     required String relationshipGoal,
     required List<File?> images,
-    Map<String, dynamic>? locationWithCity, // Updated to include city
-    String? city, // Keep city parameter for manual override if needed
+    Map<String, dynamic>? locationWithCity,
+    String? city,
   }) async {
     try {
       final userId = currentUserId;
@@ -118,10 +119,8 @@ class ProfileService {
         return false;
       }
 
-      // Upload images first
       final imageUrls = await _uploadImages(images, userId);
 
-      // Prepare profile data
       final profileData = {
         'userId': userId,
         'firstName': firstName,
@@ -134,7 +133,6 @@ class ProfileService {
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // Add location and city data
       if (locationWithCity != null) {
         profileData['location'] = {
           'latitude': locationWithCity['latitude'],
@@ -145,7 +143,6 @@ class ProfileService {
         profileData['city'] = city;
       }
 
-      // Save to Firestore
       await _firestore
           .collection('users')
           .doc(userId)
@@ -153,7 +150,6 @@ class ProfileService {
 
       debugPrint('Profile saved successfully');
       return true;
-
     } catch (e) {
       debugPrint('Error saving profile: $e');
       return false;
@@ -196,5 +192,227 @@ class ProfileService {
       debugPrint('Error updating profile field: $e');
       return false;
     }
+  }
+
+  // Save like to Firestore
+  Future<bool> saveLike(String toUserId) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        debugPrint('No user logged in');
+        return false;
+      }
+
+      final likeData = {
+        'fromUserId': userId,
+        'toUserId': toUserId,
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+
+      await _firestore
+          .collection('likes')
+          .doc('${userId}_$toUserId')
+          .set(likeData);
+
+      debugPrint('Like saved for user $toUserId');
+      return true;
+    } catch (e) {
+      debugPrint('Error saving like: $e');
+      return false;
+    }
+  }
+
+  // Check for mutual like
+  Future<bool> checkMutualLike(String otherUserId) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) return false;
+
+      final doc = await _firestore
+          .collection('likes')
+          .doc('${otherUserId}_$userId')
+          .get();
+      
+      return doc.exists;
+    } catch (e) {
+      debugPrint('Error checking mutual like: $e');
+      return false;
+    }
+  }
+
+  // Create a match
+  Future<bool> createMatch(String otherUserId) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) return false;
+
+      final matchData = {
+        'userIds': [userId, otherUserId],
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastMessage': null,
+        'lastMessageTime': null,
+      };
+
+      await _firestore
+          .collection('matches')
+          .doc('${userId}_$otherUserId')
+          .set(matchData);
+
+      await _firestore
+          .collection('matches')
+          .doc('${otherUserId}_$userId')
+          .set(matchData);
+
+      debugPrint('Match created with $otherUserId');
+      return true;
+    } catch (e) {
+      debugPrint('Error creating match: $e');
+      return false;
+    }
+  }
+
+  // Get all users for swiping with matching criteria
+  Future<List<Map<String, dynamic>>> getAllUsersForSwiping({
+    int limit = 20,
+    bool includeDistanceFilter = false,
+    double maxDistance = 100.0,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        debugPrint('No current user for swiping');
+        return [];
+      }
+
+      debugPrint('Fetching users for swiping (limit: $limit)...');
+
+      final currentUserProfile = await getUserProfile(userId);
+
+      Query query = _firestore
+          .collection('users')
+          .where('userId', isNotEqualTo: userId)
+          .limit(limit);
+
+      final QuerySnapshot snapshot = await query.get();
+      debugPrint('Found ${snapshot.docs.length} users in total');
+
+      List<Map<String, dynamic>> users = [];
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final userId = doc.id;
+
+        if (data['firstName'] == null || 
+            data['bio'] == null || 
+            (data['images'] == null || (data['images'] as List).isEmpty)) {
+          debugPrint('Skipping incomplete profile: $userId');
+          continue;
+        }
+
+        double compatibilityScore = _calculateCompatibilityScore(
+          currentUserProfile,
+          data,
+        );
+
+        final profile = {
+          'id': userId,
+          'name': '${data['firstName']} ${data['lastName'] ?? ''}'.trim(),
+          'firstName': data['firstName'],
+          'lastName': data['lastName'] ?? '',
+          'bio': data['bio'],
+          'city': data['city'] ?? 'Unknown',
+          'relationshipGoal': data['relationshipGoal'] ?? '',
+          'images': data['images'] ?? [],
+          'location': data['location'],
+          'fullProfile': {
+            ...data,
+            'id': userId,
+          },
+          'distance': _calculateDistance(
+            data['location']?['latitude'],
+            data['location']?['longitude'],
+            currentUserProfile?['location']?['latitude'],
+            currentUserProfile?['location']?['longitude'],
+          ),
+          'compatibilityScore': compatibilityScore,
+        };
+
+        users.add(profile);
+        debugPrint('Added profile: ${profile['name']} from ${profile['city']}');
+      }
+
+      users.sort((a, b) => 
+        (b['compatibilityScore'] as double).compareTo(a['compatibilityScore'] as double)
+      );
+
+      return users;
+    } on FirebaseException catch (e) {
+      debugPrint('Firebase error getting users: ${e.code} - ${e.message}');
+      return [];
+    } catch (e) {
+      debugPrint('Error getting users for swiping: $e');
+      return [];
+    }
+  }
+
+  // Calculate compatibility score
+  double _calculateCompatibilityScore(
+    Map<String, dynamic>? currentUser,
+    Map<String, dynamic> otherUser,
+  ) {
+    double score = 0.0;
+
+    if (currentUser == null) return score;
+
+    final currentGoal = currentUser['relationshipGoal']?.toString().toLowerCase();
+    final otherGoal = otherUser['relationshipGoal']?.toString().toLowerCase();
+    if (currentGoal != null && otherGoal != null && currentGoal == otherGoal) {
+      score += 0.5;
+    }
+
+    final distance = _calculateDistance(
+      otherUser['location']?['latitude'],
+      otherUser['location']?['longitude'],
+      currentUser['location']?['latitude'],
+      currentUser['location']?['longitude'],
+    );
+    if (distance < 50.0) {
+      score += 0.3 * (1 - (distance / 50.0));
+    }
+
+    return score;
+  }
+
+  // Calculate distance between users
+  double _calculateDistance(
+    dynamic otherLat,
+    dynamic otherLng,
+    dynamic currentLat,
+    dynamic currentLng,
+  ) {
+    try {
+      if (otherLat == null || otherLng == null || currentLat == null || currentLng == null) {
+        return 999.0;
+      }
+
+      const double earthRadius = 6371;
+      final double dLat = _degreesToRadians(otherLat - currentLat);
+      final double dLng = _degreesToRadians(otherLng - currentLng);
+      
+      final double a = sin(dLat / 2) * sin(dLat / 2) +
+                      cos(_degreesToRadians(currentLat)) * cos(_degreesToRadians(otherLat)) * 
+                      sin(dLng / 2) * sin(dLng / 2);
+      final double c = 2 * asin(sqrt(a));
+      
+      return earthRadius * c;
+    } catch (e) {
+      debugPrint('Error calculating distance: $e');
+      return 999.0;
+    }
+  }
+
+  // Helper method to convert degrees to radians
+  double _degreesToRadians(double degrees) {
+    return degrees * (pi / 180.0);
   }
 }

@@ -3,14 +3,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  // Get current user
+  User? get currentUser => _auth.currentUser;
+
   // Sign up with email and password
   Future<User?> signUpWithEmailPassword(String email, String password) async {
     try {
-      final UserCredential userCredential =
-          await _auth.createUserWithEmailAndPassword(
-        email: email.trim(),
-        password: password.trim(),
-      );
+      final UserCredential userCredential = await _auth
+          .createUserWithEmailAndPassword(
+            email: email.trim(),
+            password: password.trim(),
+          );
 
       // Send verification email
       if (userCredential.user != null && !userCredential.user!.emailVerified) {
@@ -26,11 +29,11 @@ class AuthService {
   // Log in with email and password
   Future<User?> loginWithEmailPassword(String email, String password) async {
     try {
-      final UserCredential userCredential =
-          await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password.trim(),
-      );
+      final UserCredential userCredential = await _auth
+          .signInWithEmailAndPassword(
+            email: email.trim(),
+            password: password.trim(),
+          );
 
       if (userCredential.user != null) {
         await userCredential.user!.reload();
@@ -46,30 +49,30 @@ class AuthService {
   }
 
   Future<void> resetPassword(String email) async {
-  try {
-    await _auth.sendPasswordResetEmail(email: email);
-  } on FirebaseAuthException catch (e) {
-    throw Exception(_handleAuthException(e));
-  }
-}
-
-Future<bool> isEmailVerified() async {
-  final user = _auth.currentUser;
-  if (user != null) {
     try {
-      await user.reload();
-      return user.emailVerified;
-    } catch (e) {
-      return false;
+      await _auth.sendPasswordResetEmail(email: email);
+    } on FirebaseAuthException catch (e) {
+      throw Exception(_handleAuthException(e));
     }
   }
-  return false;
-}
 
-// Get current user
-User? getCurrentUser() {
-  return _auth.currentUser;
-}
+  Future<bool> isEmailVerified() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      try {
+        await user.reload();
+        return user.emailVerified;
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // Get current user
+  User? getCurrentUser() {
+    return _auth.currentUser;
+  }
 
   // Sign out
   Future<void> signOut() async {

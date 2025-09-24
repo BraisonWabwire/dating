@@ -60,6 +60,10 @@ class MyApp extends StatelessWidget {
         '/profiles': (context) => const Profiles(),
         '/Chat_page': (context) => const ChatPage(),
         '/update_profile': (context) => const UpdateProfile(),
+        '/chat': (context) => const ChatPage(),
+        // '/likes': (context) => const LikesScreen(),
+        // '/chats': (context) => const ChatsScreen(),
+        // '/search': (context) => const SearchScreen(),
       },
     );
   }

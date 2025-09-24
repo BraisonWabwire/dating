@@ -1,5 +1,6 @@
+import 'dart:convert'; // Required for base64 decoding
 import 'package:dating/services/auth_service.dart';
-import 'package:dating/services/profile_service.dart'; // Import ProfileService
+import 'package:dating/services/profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:card_swiper/card_swiper.dart';
 
@@ -11,8 +12,9 @@ class Profiles extends StatefulWidget {
 }
 
 class _ProfilesState extends State<Profiles> {
-  final ProfileService _profileService = ProfileService(); // Initialize ProfileService
+  final ProfileService _profileService = ProfileService();
   List<Map<String, dynamic>> profiles = [];
+  List<Map<String, dynamic>> swiperItems = []; // Flattened list for Swiper
   bool isLoading = true;
 
   @override
@@ -21,7 +23,7 @@ class _ProfilesState extends State<Profiles> {
     _fetchProfiles();
   }
 
-  // Fetch profiles from ProfileService
+  // Fetch profiles and prepare swiper items
   Future<void> _fetchProfiles() async {
     setState(() {
       isLoading = true;
@@ -32,8 +34,31 @@ class _ProfilesState extends State<Profiles> {
         includeDistanceFilter: true,
         maxDistance: 100.0,
       );
+
+      // Flatten profiles to create swiper items (up to 3 images per profile)
+      List<Map<String, dynamic>> tempSwiperItems = [];
+      for (var profile in fetchedProfiles) {
+        final images = (profile['images'] as List?) ?? [];
+        // Take up to 3 images, or use fallback if empty
+        final profileImages = images.isNotEmpty
+            ? images.take(3).toList()
+            : ['https://i.pravatar.cc/300'];
+        for (var image in profileImages) {
+          tempSwiperItems.add({
+            'image': image,
+            'profileId': profile['id'],
+            'name': profile['name'],
+            'bio': profile['bio'],
+            'city': profile['city'],
+            'relationshipGoal': profile['relationshipGoal'],
+            'imageCount': profileImages.length, // Track number of images
+          });
+        }
+      }
+
       setState(() {
         profiles = fetchedProfiles;
+        swiperItems = tempSwiperItems;
         isLoading = false;
       });
     } catch (e) {
@@ -47,7 +72,7 @@ class _ProfilesState extends State<Profiles> {
     }
   }
 
-  // Handle like action
+  // Handle like action for the entire profile
   Future<void> _handleLike(String toUserId) async {
     try {
       final success = await _profileService.saveLike(toUserId);
@@ -72,10 +97,17 @@ class _ProfilesState extends State<Profiles> {
     }
   }
 
-  // Handle dislike action (optional: can be extended for additional logic)
+  // Handle dislike action for the entire profile
   void _handleDislike(String toUserId) {
-    // Optionally implement logic for disliking (e.g., save to Firestore)
     debugPrint('Disliked user: $toUserId');
+  }
+
+  // Remove all images for a profile from swiperItems
+  void _removeProfile(String profileId) {
+    setState(() {
+      swiperItems.removeWhere((item) => item['profileId'] == profileId);
+      profiles.removeWhere((profile) => profile['id'] == profileId);
+    });
   }
 
   @override
@@ -112,19 +144,64 @@ class _ProfilesState extends State<Profiles> {
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
-          : profiles.isEmpty
+          : swiperItems.isEmpty
               ? const Center(child: Text('No profiles available'))
               : Column(
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(top: 40),
                       child: Swiper(
-                        itemCount: profiles.length,
+                        itemCount: swiperItems.length,
                         itemBuilder: (BuildContext context, int index) {
-                          final profile = profiles[index];
-                          final imageUrl = (profile['images'] as List).isNotEmpty
-                              ? profile['images'][0]
-                              : 'https://i.pravatar.cc/300'; // Fallback image
+                          final item = swiperItems[index];
+                          final imageUrl = item['image'];
+                          debugPrint('Loading image for ${item['name']}: $imageUrl');
+
+                          Widget imageWidget;
+                          if (imageUrl.startsWith('data:image/')) {
+                            // Handle base64 image
+                            try {
+                              final base64Data = imageUrl.split(',').last;
+                              final imageBytes = base64Decode(base64Data);
+                              imageWidget = Image.memory(
+                                imageBytes,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  debugPrint('Base64 image load error for ${item['name']}: $error');
+                                  return Container(
+                                    color: Colors.grey,
+                                    child: const Center(
+                                      child: Icon(Icons.error, color: Colors.white),
+                                    ),
+                                  );
+                                },
+                              );
+                            } catch (e) {
+                              debugPrint('Base64 decode error for ${item['name']}: $e');
+                              imageWidget = Container(
+                                color: Colors.grey,
+                                child: const Center(
+                                  child: Icon(Icons.error, color: Colors.white),
+                                ),
+                              );
+                            }
+                          } else {
+                            // Handle network image
+                            imageWidget = Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                debugPrint('Network image load error for $imageUrl: $error');
+                                return Container(
+                                  color: Colors.grey,
+                                  child: const Center(
+                                    child: Icon(Icons.error, color: Colors.white),
+                                  ),
+                                );
+                              },
+                            );
+                          }
+
                           return Card(
                             elevation: 8,
                             shape: RoundedRectangleBorder(
@@ -135,18 +212,7 @@ class _ProfilesState extends State<Profiles> {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(20),
-                                  child: Image.network(
-                                    imageUrl,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Container(
-                                        color: Colors.grey,
-                                        child: const Center(
-                                          child: Icon(Icons.error, color: Colors.white),
-                                        ),
-                                      );
-                                    },
-                                  ),
+                                  child: imageWidget,
                                 ),
                                 Container(
                                   decoration: BoxDecoration(
@@ -169,7 +235,7 @@ class _ProfilesState extends State<Profiles> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        profile['name'] ?? 'Unknown',
+                                        item['name'] ?? 'Unknown',
                                         style: const TextStyle(
                                           fontSize: 28,
                                           fontWeight: FontWeight.bold,
@@ -178,7 +244,7 @@ class _ProfilesState extends State<Profiles> {
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
-                                        profile['bio'] ?? 'No bio available',
+                                        item['bio'] ?? 'No bio available',
                                         style: const TextStyle(
                                           fontSize: 16,
                                           color: Colors.white,
@@ -186,14 +252,14 @@ class _ProfilesState extends State<Profiles> {
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
-                                        profile['city'] ?? 'Unknown City',
+                                        item['city'] ?? 'Unknown City',
                                         style: const TextStyle(
                                           fontSize: 14,
                                           color: Colors.white70,
                                         ),
                                       ),
                                       Text(
-                                        'Goal: ${profile['relationshipGoal'] ?? 'Not specified'}',
+                                        'Goal: ${item['relationshipGoal'] ?? 'Not specified'}',
                                         style: const TextStyle(
                                           fontSize: 14,
                                           color: Colors.white70,
@@ -210,7 +276,21 @@ class _ProfilesState extends State<Profiles> {
                         itemHeight: MediaQuery.of(context).size.height * 0.6,
                         layout: SwiperLayout.STACK,
                         onIndexChanged: (index) {
-                          // Optional: Handle index change if needed
+                          // Check if we've reached the last image of the current profile
+                          if (index < swiperItems.length) {
+                            final item = swiperItems[index];
+                            final profileId = item['profileId'];
+                            final imageCount = item['imageCount'];
+                            // Count how many images of this profile have been shown
+                            final shownImages = swiperItems
+                                .sublist(0, index + 1)
+                                .where((i) => i['profileId'] == profileId)
+                                .length;
+                            if (shownImages >= imageCount) {
+                              // Last image of the profile; next swipe will move to new profile
+                              debugPrint('Reached last image for profile $profileId');
+                            }
+                          }
                         },
                       ),
                     ),
@@ -221,11 +301,10 @@ class _ProfilesState extends State<Profiles> {
                         children: [
                           ElevatedButton(
                             onPressed: () {
-                              if (profiles.isNotEmpty) {
-                                _handleDislike(profiles[0]['id']);
-                                setState(() {
-                                  profiles.removeAt(0);
-                                });
+                              if (swiperItems.isNotEmpty) {
+                                final profileId = swiperItems[0]['profileId'];
+                                _handleDislike(profileId);
+                                _removeProfile(profileId);
                               }
                             },
                             style: ElevatedButton.styleFrom(
@@ -241,11 +320,10 @@ class _ProfilesState extends State<Profiles> {
                           ),
                           ElevatedButton(
                             onPressed: () {
-                              if (profiles.isNotEmpty) {
-                                _handleLike(profiles[0]['id']);
-                                setState(() {
-                                  profiles.removeAt(0);
-                                });
+                              if (swiperItems.isNotEmpty) {
+                                final profileId = swiperItems[0]['profileId'];
+                                _handleLike(profileId);
+                                _removeProfile(profileId);
                               }
                             },
                             style: ElevatedButton.styleFrom(

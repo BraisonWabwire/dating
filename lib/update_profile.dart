@@ -3,14 +3,14 @@ import 'package:dating/services/profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:card_swiper/card_swiper.dart';
 
-class Profiles extends StatefulWidget {
-  const Profiles({super.key});
+class UpdateProfile extends StatefulWidget {
+  const UpdateProfile({super.key});
 
   @override
-  State<Profiles> createState() => _ProfilesState();
+  State<UpdateProfile> createState() => _ProfilesState();
 }
 
-class _ProfilesState extends State<Profiles> {
+class _ProfilesState extends State<UpdateProfile> {
   final AuthService _authService = AuthService();
   final ProfileService _profileService = ProfileService();
   final SwiperController _swiperController = SwiperController();

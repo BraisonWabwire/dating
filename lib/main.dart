@@ -57,9 +57,17 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const Login(),
         '/signup': (context) => const Signup(),
         '/profiles': (context) => const Profiles(),
-        '/Chat_page': (context) => const ChatPage(),
+        '/Chat_page': (context) {
+          final args =
+              ModalRoute.of(context)!.settings.arguments
+                  as Map<String, dynamic>?;
+          return ChatPage(
+            toUserId: args?['toUserId'] ?? '',
+            matchName: args?['matchName'] ?? 'Unknown',
+          );
+        },
         '/update_profile': (context) => const UpdateProfile(),
-        '/chat': (context) => const ChatPage(),
+        // '/chat': (context) => const ChatPage(),
         // '/likes': (context) => const LikesScreen(),
         // '/chats': (context) => const ChatsScreen(),
         // '/search': (context) => const SearchScreen(),

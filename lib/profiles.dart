@@ -66,9 +66,9 @@ class _ProfilesState extends State<Profiles> {
       setState(() {
         isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load profiles: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load profiles: $e')));
     }
   }
 
@@ -80,20 +80,20 @@ class _ProfilesState extends State<Profiles> {
         final isMutual = await _profileService.checkMutualLike(toUserId);
         if (isMutual) {
           await _profileService.createMatch(toUserId);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Match created!')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Match created!')));
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save like')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to save like')));
       }
     } catch (e) {
       debugPrint('Error handling like: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
@@ -116,7 +116,11 @@ class _ProfilesState extends State<Profiles> {
       appBar: AppBar(
         title: const Text(
           'Swipe For A Match',
-          style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(
+            fontSize: 23,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
         backgroundColor: const Color(0xFFE91E63),
         centerTitle: true,
@@ -134,9 +138,9 @@ class _ProfilesState extends State<Profiles> {
                   (route) => false,
                 );
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Logout failed: $e')),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Logout failed: $e')));
               }
             },
           ),
@@ -145,218 +149,228 @@ class _ProfilesState extends State<Profiles> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : swiperItems.isEmpty
-              ? const Center(child: Text('No profiles available'))
-              : Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 40),
-                      child: Swiper(
-                        itemCount: swiperItems.length,
-                        itemBuilder: (BuildContext context, int index) {
-                          final item = swiperItems[index];
-                          final imageUrl = item['image'];
-                          debugPrint('Loading image for ${item['name']}: $imageUrl');
+          ? const Center(child: Text('No profiles available'))
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 40),
+                  child: Swiper(
+                    itemCount: swiperItems.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      final item = swiperItems[index];
+                      final imageUrl = item['image'];
+                      debugPrint(
+                        'Loading image for ${item['name']}: $imageUrl',
+                      );
 
-                          Widget imageWidget;
-                          if (imageUrl.startsWith('data:image/')) {
-                            // Handle base64 image
-                            try {
-                              final base64Data = imageUrl.split(',').last;
-                              final imageBytes = base64Decode(base64Data);
-                              imageWidget = Image.memory(
-                                imageBytes,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  debugPrint('Base64 image load error for ${item['name']}: $error');
-                                  return Container(
-                                    color: Colors.grey,
-                                    child: const Center(
-                                      child: Icon(Icons.error, color: Colors.white),
-                                    ),
-                                  );
-                                },
+                      Widget imageWidget;
+                      if (imageUrl.startsWith('data:image/')) {
+                        // Handle base64 image
+                        try {
+                          final base64Data = imageUrl.split(',').last;
+                          final imageBytes = base64Decode(base64Data);
+                          imageWidget = Image.memory(
+                            imageBytes,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              debugPrint(
+                                'Base64 image load error for ${item['name']}: $error',
                               );
-                            } catch (e) {
-                              debugPrint('Base64 decode error for ${item['name']}: $e');
-                              imageWidget = Container(
+                              return Container(
                                 color: Colors.grey,
                                 child: const Center(
                                   child: Icon(Icons.error, color: Colors.white),
                                 ),
                               );
-                            }
-                          } else {
-                            // Handle network image
-                            imageWidget = Image.network(
-                              imageUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                debugPrint('Network image load error for $imageUrl: $error');
-                                return Container(
-                                  color: Colors.grey,
-                                  child: const Center(
-                                    child: Icon(Icons.error, color: Colors.white),
-                                  ),
-                                );
-                              },
-                            );
-                          }
-
-                          return Card(
-                            elevation: 8,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: imageWidget,
-                                ),
-                                Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(20),
-                                    gradient: LinearGradient(
-                                      begin: Alignment.bottomCenter,
-                                      end: Alignment.topCenter,
-                                      colors: [
-                                        const Color.fromRGBO(0, 0, 0, 0.7),
-                                        Colors.transparent,
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  bottom: 20,
-                                  left: 20,
-                                  right: 20,
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item['name'] ?? 'Unknown',
-                                        style: const TextStyle(
-                                          fontSize: 28,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        item['bio'] ?? 'No bio available',
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        item['city'] ?? 'Unknown City',
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Goal: ${item['relationshipGoal'] ?? 'Not specified'}',
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                            },
+                          );
+                        } catch (e) {
+                          debugPrint(
+                            'Base64 decode error for ${item['name']}: $e',
+                          );
+                          imageWidget = Container(
+                            color: Colors.grey,
+                            child: const Center(
+                              child: Icon(Icons.error, color: Colors.white),
                             ),
                           );
-                        },
-                        itemWidth: MediaQuery.of(context).size.width * 0.9,
-                        itemHeight: MediaQuery.of(context).size.height * 0.6,
-                        layout: SwiperLayout.STACK,
-                        onIndexChanged: (index) {
-                          // Check if we've reached the last image of the current profile
-                          if (index < swiperItems.length) {
-                            final item = swiperItems[index];
-                            final profileId = item['profileId'];
-                            final imageCount = item['imageCount'];
-                            // Count how many images of this profile have been shown
-                            final shownImages = swiperItems
-                                .sublist(0, index + 1)
-                                .where((i) => i['profileId'] == profileId)
-                                .length;
-                            if (shownImages >= imageCount) {
-                              // Last image of the profile; next swipe will move to new profile
-                              debugPrint('Reached last image for profile $profileId');
-                            }
+                        }
+                      } else {
+                        // Handle network image
+                        imageWidget = Image.network(
+                          imageUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            debugPrint(
+                              'Network image load error for $imageUrl: $error',
+                            );
+                            return Container(
+                              color: Colors.grey,
+                              child: const Center(
+                                child: Icon(Icons.error, color: Colors.white),
+                              ),
+                            );
+                          },
+                        );
+                      }
+
+                      return Card(
+                        elevation: 8,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: imageWidget,
+                            ),
+                            Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(20),
+                                gradient: LinearGradient(
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.topCenter,
+                                  colors: [
+                                    const Color.fromRGBO(0, 0, 0, 0.7),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 20,
+                              left: 20,
+                              right: 20,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item['name'] ?? 'Unknown',
+                                    style: const TextStyle(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    item['bio'] ?? 'No bio available',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    item['city'] ?? 'Unknown City',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Goal: ${item['relationshipGoal'] ?? 'Not specified'}',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    itemWidth: MediaQuery.of(context).size.width * 0.9,
+                    itemHeight: MediaQuery.of(context).size.height * 0.6,
+                    layout: SwiperLayout.STACK,
+                    onIndexChanged: (index) {
+                      // Check if we've reached the last image of the current profile
+                      if (index < swiperItems.length) {
+                        final item = swiperItems[index];
+                        final profileId = item['profileId'];
+                        final imageCount = item['imageCount'];
+                        // Count how many images of this profile have been shown
+                        final shownImages = swiperItems
+                            .sublist(0, index + 1)
+                            .where((i) => i['profileId'] == profileId)
+                            .length;
+                        if (shownImages >= imageCount) {
+                          // Last image of the profile; next swipe will move to new profile
+                          debugPrint(
+                            'Reached last image for profile $profileId',
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 30),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () {
+                          if (swiperItems.isNotEmpty) {
+                            final profileId = swiperItems[0]['profileId'];
+                            _handleDislike(profileId);
+                            _removeProfile(profileId);
                           }
                         },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          shape: const CircleBorder(),
+                          padding: const EdgeInsets.all(16),
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                          size: 30,
+                        ),
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 30),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          ElevatedButton(
-                            onPressed: () {
-                              if (swiperItems.isNotEmpty) {
-                                final profileId = swiperItems[0]['profileId'];
-                                _handleDislike(profileId);
-                                _removeProfile(profileId);
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              shape: const CircleBorder(),
-                              padding: const EdgeInsets.all(16),
-                            ),
-                            child: const Icon(
-                              Icons.close,
-                              color: Colors.white,
-                              size: 30,
-                            ),
-                          ),
-                          ElevatedButton(
-                            onPressed: () {
-                              if (swiperItems.isNotEmpty) {
-                                final profileId = swiperItems[0]['profileId'];
-                                _handleLike(profileId);
-                                _removeProfile(profileId);
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFF06292),
-                              shape: const CircleBorder(),
-                              padding: const EdgeInsets.all(16),
-                            ),
-                            child: const Icon(
-                              Icons.favorite,
-                              color: Colors.white,
-                              size: 30,
-                            ),
-                          ),
-                          ElevatedButton(
-                            onPressed: () {
-                              Navigator.pushNamed(context, '/Chat_page');
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFF06292),
-                              shape: const CircleBorder(),
-                              padding: const EdgeInsets.all(16),
-                            ),
-                            child: const Icon(
-                              Icons.mail_outline,
-                              color: Colors.white,
-                              size: 30,
-                            ),
-                          ),
-                        ],
+                      ElevatedButton(
+                        onPressed: () {
+                          if (swiperItems.isNotEmpty) {
+                            final profileId = swiperItems[0]['profileId'];
+                            _handleLike(profileId);
+                            _removeProfile(profileId);
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFF06292),
+                          shape: const CircleBorder(),
+                          padding: const EdgeInsets.all(16),
+                        ),
+                        child: const Icon(
+                          Icons.favorite,
+                          color: Colors.white,
+                          size: 30,
+                        ),
                       ),
-                    ),
-                  ],
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pushNamed(context, '/Chat_page');
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFF06292),
+                          shape: const CircleBorder(),
+                          padding: const EdgeInsets.all(16),
+                        ),
+                        child: const Icon(
+                          Icons.mail_outline,
+                          color: Colors.white,
+                          size: 30,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+              ],
+            ),
       bottomNavigationBar: BottomAppBar(
         color: const Color(0xFFE91E63),
         child: Padding(
@@ -391,7 +405,14 @@ class _ProfilesState extends State<Profiles> {
               ),
               GestureDetector(
                 onTap: () {
-                  Navigator.pushNamed(context, '/Chat_page');
+                  Navigator.pushNamed(
+                    context,
+                    '/Chat_page',
+                    arguments: {
+                      'toUserId': swiperItems[0]['profileId'],
+                      'matchName': swiperItems[0]['name'],
+                    },
+                  );
                 },
                 child: const Column(
                   mainAxisSize: MainAxisSize.min,

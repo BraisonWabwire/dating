@@ -5,6 +5,7 @@ class AuthService {
 
   // Get current user
   User? get currentUser => _auth.currentUser;
+  String? get currentUserId => _auth.currentUser?.uid;
 
   // Sign up with email and password
   Future<User?> signUpWithEmailPassword(String email, String password) async {

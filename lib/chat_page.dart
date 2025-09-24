@@ -1,7 +1,14 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dating/services/auth_service.dart';
+import 'package:dating/services/profile_service.dart'; // Add ProfileService
 import 'package:flutter/material.dart';
+import 'dart:convert'; // For base64 image decoding
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key});
+  final String toUserId; // ID of the matched user
+  final String matchName; // Name of the matched user
+
+  const ChatPage({super.key, required this.toUserId, required this.matchName});
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -11,36 +18,130 @@ class Message {
   final String text;
   final bool isSentByMe;
   final DateTime timestamp;
+  final String messageId;
 
-  Message({required this.text, required this.isSentByMe, required this.timestamp});
+  Message({
+    required this.text,
+    required this.isSentByMe,
+    required this.timestamp,
+    required this.messageId,
+  });
+
+  factory Message.fromFirestore(DocumentSnapshot doc, String currentUserId) {
+    final data = doc.data() as Map<String, dynamic>;
+    return Message(
+      messageId: doc.id,
+      text: data['text'] ?? '',
+      isSentByMe: data['senderId'] == currentUserId,
+      timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
 }
 
 class _ChatPageState extends State<ChatPage> {
-  final List<Message> _messages = [];
   final TextEditingController _controller = TextEditingController();
+  final AuthService _authService = AuthService();
+  final ProfileService _profileService = ProfileService();
+  late final String _currentUserId;
+  late final String _chatId;
+  bool _isMutualMatch = false;
 
-  void _sendMessage() {
-    if (_controller.text.trim().isNotEmpty) {
-      setState(() {
-        _messages.add(Message(
-          text: _controller.text.trim(), 
-          isSentByMe: true, 
-          timestamp: DateTime.now()
-        ));
-        _controller.clear();
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    if (_authService.currentUserId == null) {
+      debugPrint('Error: User is not authenticated');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to continue')),
+      );
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+      return;
+    }
+
+    _currentUserId = _authService.currentUserId!;
+    _chatId = _generateChatId(_currentUserId, widget.toUserId);
+    debugPrint('Chat ID: $_chatId, Current User: $_currentUserId, To User: ${widget.toUserId}');
+
+    try {
+      _isMutualMatch = await _profileService.checkMutualLike(widget.toUserId);
+      if (!_isMutualMatch) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You can only chat with mutual matches')),
+        );
+      }
+      setState(() {}); // Update UI for match status
+    } catch (e) {
+      debugPrint('Error checking mutual match: $e');
+    }
+  }
+
+  // Generate a unique chat ID by sorting user IDs
+  String _generateChatId(String userId1, String userId2) {
+    final ids = [userId1, userId2]..sort();
+    return '${ids[0]}_${ids[1]}';
+  }
+
+  // Send a message to Firestore
+  Future<void> _sendMessage() async {
+    if (_controller.text.trim().isEmpty) return;
+    if (!_isMutualMatch) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You can only chat with mutual matches')),
+      );
+      return;
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(_chatId)
+          .set({}); // Create chat document if it doesn't exist
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(_chatId)
+          .collection('messages')
+          .add({
+        'senderId': _currentUserId,
+        'receiverId': widget.toUserId,
+        'text': _controller.text.trim(),
+        'timestamp': FieldValue.serverTimestamp(),
       });
-      // Simulate a response from the other user after a short delay
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted) {
-          setState(() {
-            _messages.add(Message(
-              text: 'This is a simulated reply!', 
-              isSentByMe: false, 
-              timestamp: DateTime.now()
-            ));
-          });
-        }
+      debugPrint('Message sent: ${_controller.text.trim()}');
+      _controller.clear();
+
+      // Simulate a reply (remove in production)
+      await Future.delayed(const Duration(seconds: 1));
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(_chatId)
+          .collection('messages')
+          .add({
+        'senderId': widget.toUserId,
+        'receiverId': _currentUserId,
+        'text': 'This is a simulated reply!',
+        'timestamp': FieldValue.serverTimestamp(),
       });
+    } catch (e) {
+      debugPrint('Error sending message: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send message: $e')),
+      );
+    }
+  }
+
+  // Fetch user image for app bar and message bubbles
+  Future<String> _getUserImage(String userId) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      final images = doc.data()?['images'] as List?;
+      return images?.isNotEmpty ?? false ? images![0] : 'https://i.pravatar.cc/300';
+    } catch (e) {
+      debugPrint('Error fetching user image: $e');
+      return 'https://i.pravatar.cc/300';
     }
   }
 
@@ -78,10 +179,18 @@ class _ChatPageState extends State<ChatPage> {
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
                 ),
-                child: const CircleAvatar(
-                  radius: 22,
-                  backgroundImage: AssetImage('assets/images/welcome.png'),
-                  backgroundColor: Colors.white,
+                child: FutureBuilder<String>(
+                  future: _getUserImage(widget.toUserId),
+                  builder: (context, snapshot) {
+                    final imageUrl = snapshot.data ?? 'https://i.pravatar.cc/300';
+                    return CircleAvatar(
+                      radius: 22,
+                      backgroundImage: imageUrl.startsWith('data:image/')
+                          ? MemoryImage(base64Decode(imageUrl.split(',').last))
+                          : NetworkImage(imageUrl) as ImageProvider,
+                      backgroundColor: Colors.white,
+                    );
+                  },
                 ),
               ),
               const SizedBox(width: 12),
@@ -90,16 +199,16 @@ class _ChatPageState extends State<ChatPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      'Match Name',
-                      style: TextStyle(
+                    Text(
+                      widget.matchName,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     Text(
-                      'Online',
+                      _isMutualMatch ? 'Online' : 'Match Required',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.8),
                         fontSize: 12,
@@ -142,7 +251,6 @@ class _ChatPageState extends State<ChatPage> {
       ),
       body: Column(
         children: [
-          // Messages List - FIXED: Removed nested Expanded
           Expanded(
             child: Container(
               decoration: const BoxDecoration(
@@ -152,8 +260,24 @@ class _ChatPageState extends State<ChatPage> {
                   topRight: Radius.circular(25),
                 ),
               ),
-              child: _messages.isEmpty
-                  ? const Center(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('chats')
+                    .doc(_chatId)
+                    .collection('messages')
+                    .orderBy('timestamp', descending: true)
+                    .limit(50)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    debugPrint('StreamBuilder error: ${snapshot.error}');
+                    return Center(child: Text('Error: ${snapshot.error}'));
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -173,130 +297,144 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                         ],
                       ),
-                    )
-                  : ListView.builder(
-                      reverse: true,
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80), // Extra bottom padding for input
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        final message = _messages[_messages.length - 1 - index];
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0),
-                          child: Row(
-                            mainAxisAlignment: message.isSentByMe 
-                                ? MainAxisAlignment.end 
-                                : MainAxisAlignment.start,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              if (!message.isSentByMe) ...[
-                                CircleAvatar(
-                                  radius: 16,
-                                  backgroundColor: Colors.grey[300],
-                                  child: const Icon(
-                                    Icons.person,
-                                    size: 16,
-                                    color: Color(0xFF666666),
-                                  ),
+                    );
+                  }
+
+                  final messages = snapshot.data!.docs
+                      .map((doc) => Message.fromFirestore(doc, _currentUserId))
+                      .toList();
+
+                  return ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) {
+                      final message = messages[messages.length - 1 - index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Row(
+                          mainAxisAlignment: message.isSentByMe
+                              ? MainAxisAlignment.end
+                              : MainAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (!message.isSentByMe) ...[
+                              FutureBuilder<String>(
+                                future: _getUserImage(widget.toUserId),
+                                builder: (context, snapshot) {
+                                  final imageUrl = snapshot.data ?? 'https://i.pravatar.cc/300';
+                                  return CircleAvatar(
+                                    radius: 16,
+                                    backgroundImage: imageUrl.startsWith('data:image/')
+                                        ? MemoryImage(base64Decode(imageUrl.split(',').last))
+                                        : NetworkImage(imageUrl) as ImageProvider,
+                                    backgroundColor: Colors.grey[300],
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Flexible(
+                              child: Container(
+                                constraints: BoxConstraints(
+                                  maxWidth: MediaQuery.of(context).size.width * 0.75,
                                 ),
-                                const SizedBox(width: 8),
-                              ],
-                              Flexible(
-                                child: Container(
-                                  constraints: BoxConstraints(
-                                    maxWidth: MediaQuery.of(context).size.width * 0.75,
+                                margin: EdgeInsets.only(
+                                  left: message.isSentByMe ? 50 : 0,
+                                  right: message.isSentByMe ? 0 : 50,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0,
+                                  vertical: 12.0,
+                                ),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: message.isSentByMe
+                                        ? [
+                                            const Color(0xFFE91E63),
+                                            const Color(0xFFF06292),
+                                          ]
+                                        : [
+                                            Color(0xFFF5F5F5),
+                                            Color(0xFFE8E8E8),
+                                          ],
+                                    begin: message.isSentByMe
+                                        ? Alignment.centerLeft
+                                        : Alignment.topLeft,
                                   ),
-                                  margin: EdgeInsets.only(
-                                    left: message.isSentByMe ? 50 : 0,
-                                    right: message.isSentByMe ? 0 : 50,
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(message.isSentByMe ? 20 : 0),
+                                    topRight: Radius.circular(message.isSentByMe ? 0 : 20),
+                                    bottomLeft: const Radius.circular(20),
+                                    bottomRight: const Radius.circular(20),
                                   ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16.0, 
-                                    vertical: 12.0,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: message.isSentByMe
-                                          ? [
-                                              const Color(0xFFE91E63),
-                                              const Color(0xFFF06292),
-                                            ]
-                                          : [
-                                              Color(0xFFF5F5F5),
-                                              Color(0xFFE8E8E8),
-                                            ],
-                                      begin: message.isSentByMe 
-                                          ? Alignment.centerLeft 
-                                          : Alignment.topLeft,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
                                     ),
-                                    borderRadius: BorderRadius.only(
-                                      topLeft: Radius.circular(message.isSentByMe ? 20 : 0),
-                                      topRight: Radius.circular(message.isSentByMe ? 0 : 20),
-                                      bottomLeft: const Radius.circular(20),
-                                      bottomRight: const Radius.circular(20),
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.1),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: message.isSentByMe 
-                                        ? CrossAxisAlignment.end 
-                                        : CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Flexible(
-                                        child: Text(
-                                          message.text,
-                                          style: TextStyle(
-                                            color: message.isSentByMe 
-                                                ? Colors.white 
-                                                : const Color(0xFF333333),
-                                            fontSize: 15,
-                                            height: 1.3,
-                                          ),
-                                          softWrap: true,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _formatTime(message.timestamp),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: message.isSentByMe
+                                      ? CrossAxisAlignment.end
+                                      : CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        message.text,
                                         style: TextStyle(
-                                          fontSize: 11,
-                                          color: message.isSentByMe 
-                                              ? Colors.white.withOpacity(0.8) 
-                                              : const Color(0xFF999999),
-                                          fontWeight: FontWeight.w500,
+                                          color: message.isSentByMe
+                                              ? Colors.white
+                                              : const Color(0xFF333333),
+                                          fontSize: 15,
+                                          height: 1.3,
                                         ),
+                                        softWrap: true,
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _formatTime(message.timestamp),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: message.isSentByMe
+                                            ? Colors.white.withOpacity(0.8)
+                                            : const Color(0xFF999999),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              if (message.isSentByMe) ...[
-                                const SizedBox(width: 8),
-                                CircleAvatar(
-                                  radius: 16,
-                                  backgroundColor: const Color(0xFFE91E63),
-                                  child: const Icon(
-                                    Icons.person,
-                                    size: 16,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
+                            ),
+                            if (message.isSentByMe) ...[
+                              const SizedBox(width: 8),
+                              FutureBuilder<String>(
+                                future: _getUserImage(_currentUserId),
+                                builder: (context, snapshot) {
+                                  final imageUrl = snapshot.data ?? 'https://i.pravatar.cc/300';
+                                  return CircleAvatar(
+                                    radius: 16,
+                                    backgroundImage: imageUrl.startsWith('data:image/')
+                                        ? MemoryImage(base64Decode(imageUrl.split(',').last))
+                                        : NetworkImage(imageUrl) as ImageProvider,
+                                    backgroundColor: const Color(0xFFE91E63),
+                                  );
+                                },
+                              ),
                             ],
-                          ),
-                        );
-                      },
-                    ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ),
-          
-          // Input Container - FIXED: Removed SafeArea and simplified structure
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             decoration: BoxDecoration(
@@ -312,8 +450,6 @@ class _ChatPageState extends State<ChatPage> {
             child: Row(
               children: [
                 const SizedBox(width: 8),
-                
-                // Text input
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
@@ -351,10 +487,7 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   ),
                 ),
-                
                 const SizedBox(width: 8),
-                
-                // Send button - FIXED: Corrected shadow color syntax
                 Container(
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
@@ -365,7 +498,7 @@ class _ChatPageState extends State<ChatPage> {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Color(0x4DE91E63), // Fixed: Used hex alpha value
+                        color: Color(0x4DE91E63),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -373,7 +506,9 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   child: IconButton(
                     icon: const Icon(Icons.send, size: 24, color: Colors.white),
-                    onPressed: _controller.text.trim().isEmpty ? null : _sendMessage,
+                    onPressed: _controller.text.trim().isEmpty || !_isMutualMatch
+                        ? null
+                        : _sendMessage,
                     padding: const EdgeInsets.all(12),
                     constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                   ),
@@ -390,7 +525,7 @@ class _ChatPageState extends State<ChatPage> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final messageDate = DateTime(timestamp.year, timestamp.month, timestamp.day);
-    
+
     if (messageDate == today) {
       return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
     } else {

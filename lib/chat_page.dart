@@ -1,12 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dating/services/auth_service.dart';
-import 'package:dating/services/profile_service.dart'; // Add ProfileService
+import 'package:dating/services/profile_service.dart';
 import 'package:flutter/material.dart';
-import 'dart:convert'; // For base64 image decoding
+import 'dart:convert';
 
 class ChatPage extends StatefulWidget {
-  final String toUserId; // ID of the matched user
-  final String matchName; // Name of the matched user
+  final String toUserId;
+  final String matchName;
 
   const ChatPage({super.key, required this.toUserId, required this.matchName});
 
@@ -73,19 +73,17 @@ class _ChatPageState extends State<ChatPage> {
           const SnackBar(content: Text('You can only chat with mutual matches')),
         );
       }
-      setState(() {}); // Update UI for match status
+      setState(() {});
     } catch (e) {
       debugPrint('Error checking mutual match: $e');
     }
   }
 
-  // Generate a unique chat ID by sorting user IDs
   String _generateChatId(String userId1, String userId2) {
     final ids = [userId1, userId2]..sort();
     return '${ids[0]}_${ids[1]}';
   }
 
-  // Send a message to Firestore
   Future<void> _sendMessage() async {
     if (_controller.text.trim().isEmpty) return;
     if (!_isMutualMatch) {
@@ -96,10 +94,7 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     try {
-      await FirebaseFirestore.instance
-          .collection('chats')
-          .doc(_chatId)
-          .set({}); // Create chat document if it doesn't exist
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).set({});
       await FirebaseFirestore.instance
           .collection('chats')
           .doc(_chatId)
@@ -133,7 +128,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // Fetch user image for app bar and message bubbles
   Future<String> _getUserImage(String userId) async {
     try {
       final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
@@ -222,21 +216,15 @@ class _ChatPageState extends State<ChatPage> {
           actions: [
             IconButton(
               icon: const Icon(Icons.videocam, color: Colors.white, size: 28),
-              onPressed: () {
-                // Video call functionality
-              },
+              onPressed: () {},
             ),
             IconButton(
               icon: const Icon(Icons.call, color: Colors.white, size: 28),
-              onPressed: () {
-                // Voice call functionality
-              },
+              onPressed: () {},
             ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Colors.white, size: 28),
-              onSelected: (value) {
-                // Handle menu item selection
-              },
+              onSelected: (value) {},
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'Mute notifications', child: Text('Mute notifications')),
                 const PopupMenuItem(value: 'Block', child: Text('Block')),
@@ -475,9 +463,7 @@ class _ChatPageState extends State<ChatPage> {
                         ),
                         prefixIcon: IconButton(
                           icon: const Icon(Icons.attach_file, size: 20, color: Color(0xFFE91E63)),
-                          onPressed: () {
-                            // Attachment functionality
-                          },
+                          onPressed: () {},
                         ),
                       ),
                       maxLines: null,

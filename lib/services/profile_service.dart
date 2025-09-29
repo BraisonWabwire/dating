@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:math'; // Added for sin, cos, sqrt, asin
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -42,7 +42,6 @@ class ProfileService {
         desiredAccuracy: LocationAccuracy.high,
       );
 
-      // Get city name from coordinates using reverse geocoding
       String? cityName;
       try {
         List<Placemark> placemarks = await placemarkFromCoordinates(
@@ -90,13 +89,18 @@ class ProfileService {
   Future<List<String>> _uploadImages(List<File?> images, String userId) async {
     List<String> imageUrls = [];
     
-    for (int i = 0; i < images.length; i++) {
+    for (int i = 0; i < images.length && i < 3; i++) {
       if (images[i] != null) {
         final url = await _uploadImage(images[i]!, userId);
         if (url != null) {
           imageUrls.add(url);
         }
       }
+    }
+    
+    // If no images are uploaded, provide a default image
+    if (imageUrls.isEmpty) {
+      imageUrls.add('https://i.pravatar.cc/300');
     }
     
     return imageUrls;
@@ -123,11 +127,11 @@ class ProfileService {
 
       final profileData = {
         'userId': userId,
-        'firstName': firstName,
-        'lastName': lastName,
-        'fullName': '$firstName $lastName',
-        'bio': bio,
-        'relationshipGoal': relationshipGoal,
+        'firstName': firstName.isNotEmpty ? firstName : 'Anonymous',
+        'lastName': lastName.isNotEmpty ? lastName : '',
+        'fullName': '${firstName.isNotEmpty ? firstName : 'Anonymous'} ${lastName.isNotEmpty ? lastName : ''}'.trim(),
+        'bio': bio.isNotEmpty ? bio : 'No bio provided',
+        'relationshipGoal': relationshipGoal.isNotEmpty ? relationshipGoal : 'Not specified',
         'images': imageUrls,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -139,8 +143,8 @@ class ProfileService {
           'longitude': locationWithCity['longitude'],
         };
         profileData['city'] = locationWithCity['city'] ?? city ?? 'Unknown City';
-      } else if (city != null && city.isNotEmpty) {
-        profileData['city'] = city;
+      } else {
+        profileData['city'] = city ?? 'Unknown City';
       }
 
       await _firestore
@@ -148,7 +152,8 @@ class ProfileService {
           .doc(userId)
           .set(profileData, SetOptions(merge: true));
 
-      debugPrint('Profile saved successfully');
+      debugPrint('Profile saved successfully for user: $userId');
+      debugPrint('Profile data: $profileData');
       return true;
     } catch (e) {
       debugPrint('Error saving profile: $e');
@@ -163,6 +168,7 @@ class ProfileService {
       if (doc.exists) {
         return doc.data();
       }
+      debugPrint('Profile not found for user: $userId');
       return null;
     } catch (e) {
       debugPrint('Error getting profile: $e');
@@ -177,7 +183,10 @@ class ProfileService {
   }) async {
     try {
       final userId = currentUserId;
-      if (userId == null) return false;
+      if (userId == null) {
+        debugPrint('No user logged in');
+        return false;
+      }
 
       await _firestore
           .collection('users')
@@ -187,6 +196,7 @@ class ProfileService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
+      debugPrint('Profile field $field updated successfully');
       return true;
     } catch (e) {
       debugPrint('Error updating profile field: $e');
@@ -203,18 +213,15 @@ class ProfileService {
         return false;
       }
 
+      final likeId = _generateSortedId(userId, toUserId);
       final likeData = {
         'fromUserId': userId,
         'toUserId': toUserId,
         'timestamp': FieldValue.serverTimestamp(),
       };
 
-      await _firestore
-          .collection('likes')
-          .doc('${userId}_$toUserId')
-          .set(likeData);
-
-      debugPrint('Like saved for user $toUserId');
+      await _firestore.collection('likes').doc(likeId).set(likeData);
+      debugPrint('Like saved: $userId -> $toUserId');
       return true;
     } catch (e) {
       debugPrint('Error saving like: $e');
@@ -226,14 +233,28 @@ class ProfileService {
   Future<bool> checkMutualLike(String otherUserId) async {
     try {
       final userId = currentUserId;
-      if (userId == null) return false;
+      if (userId == null) {
+        debugPrint('No user logged in');
+        return false;
+      }
 
-      final doc = await _firestore
+      final userLikeDoc = await _firestore
           .collection('likes')
-          .doc('${otherUserId}_$userId')
+          .doc(_generateSortedId(userId, otherUserId))
           .get();
-      
-      return doc.exists;
+
+      if (!userLikeDoc.exists) {
+        debugPrint('No like from $userId to $otherUserId');
+        return false;
+      }
+
+      final mutualLikeDoc = await _firestore
+          .collection('likes')
+          .doc(_generateSortedId(otherUserId, userId))
+          .get();
+
+      debugPrint('Mutual like check: ${mutualLikeDoc.exists}');
+      return mutualLikeDoc.exists;
     } catch (e) {
       debugPrint('Error checking mutual like: $e');
       return false;
@@ -244,8 +265,12 @@ class ProfileService {
   Future<bool> createMatch(String otherUserId) async {
     try {
       final userId = currentUserId;
-      if (userId == null) return false;
+      if (userId == null) {
+        debugPrint('No user logged in');
+        return false;
+      }
 
+      final matchId = _generateSortedId(userId, otherUserId);
       final matchData = {
         'userIds': [userId, otherUserId],
         'createdAt': FieldValue.serverTimestamp(),
@@ -253,22 +278,59 @@ class ProfileService {
         'lastMessageTime': null,
       };
 
-      await _firestore
-          .collection('matches')
-          .doc('${userId}_$otherUserId')
-          .set(matchData);
-
-      await _firestore
-          .collection('matches')
-          .doc('${otherUserId}_$userId')
-          .set(matchData);
-
-      debugPrint('Match created with $otherUserId');
+      await _firestore.collection('matches').doc(matchId).set(matchData);
+      debugPrint('Match created: $matchId');
       return true;
     } catch (e) {
       debugPrint('Error creating match: $e');
       return false;
     }
+  }
+
+  // Get mutual matches
+  Future<List<Map<String, dynamic>>> getMutualMatches() async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        debugPrint('No user logged in');
+        return [];
+      }
+
+      final snapshot = await _firestore
+          .collection('matches')
+          .where('userIds', arrayContains: userId)
+          .get();
+
+      List<Map<String, dynamic>> matches = [];
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final otherUserId = (data['userIds'] as List).firstWhere((id) => id != userId);
+        final profile = await getUserProfile(otherUserId);
+        if (profile != null) {
+          matches.add({
+            'userId': otherUserId,
+            'name': profile['fullName'] ?? 'Unknown',
+            'image': (profile['images'] as List?)?.isNotEmpty ?? false
+                ? profile['images'][0]
+                : 'https://i.pravatar.cc/300',
+            'lastMessage': data['lastMessage'],
+            'lastMessageTime': data['lastMessageTime'],
+          });
+        }
+      }
+
+      debugPrint('Fetched ${matches.length} mutual matches');
+      return matches;
+    } catch (e) {
+      debugPrint('Error fetching mutual matches: $e');
+      return [];
+    }
+  }
+
+  // Generate sorted ID
+  String _generateSortedId(String userId1, String userId2) {
+    final ids = [userId1, userId2]..sort();
+    return '${ids[0]}_${ids[1]}';
   }
 
   // Get all users for swiping with matching criteria
@@ -300,13 +362,26 @@ class ProfileService {
 
       for (var doc in snapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
-        final userId = doc.id;
+        final profileUserId = doc.id;
 
-        if (data['firstName'] == null || 
-            data['bio'] == null || 
-            (data['images'] == null || (data['images'] as List).isEmpty)) {
-          debugPrint('Skipping incomplete profile: $userId');
+        // Relaxed completeness check
+        if (data['fullName'] == null) {
+          debugPrint('Skipping profile $profileUserId: missing fullName');
           continue;
+        }
+
+        // Check if user has already liked this profile
+        try {
+          final likeDoc = await _firestore
+              .collection('likes')
+              .doc(_generateSortedId(userId, profileUserId))
+              .get();
+          if (likeDoc.exists) {
+            debugPrint('Skipping already liked profile: $profileUserId');
+            continue;
+          }
+        } catch (e) {
+          debugPrint('No likes collection or document for $profileUserId, treating as not liked: $e');
         }
 
         double compatibilityScore = _calculateCompatibilityScore(
@@ -314,37 +389,47 @@ class ProfileService {
           data,
         );
 
+        double distance = _calculateDistance(
+          data['location']?['latitude'],
+          data['location']?['longitude'],
+          currentUserProfile?['location']?['latitude'],
+          currentUserProfile?['location']?['longitude'],
+        );
+
+        if (includeDistanceFilter && distance > maxDistance) {
+          debugPrint('Skipping profile $profileUserId due to distance: $distance km');
+          continue;
+        }
+
         final profile = {
-          'id': userId,
-          'name': '${data['firstName']} ${data['lastName'] ?? ''}'.trim(),
-          'firstName': data['firstName'],
+          'id': profileUserId,
+          'name': data['fullName'] ?? 'Unknown',
+          'firstName': data['firstName'] ?? '',
           'lastName': data['lastName'] ?? '',
-          'bio': data['bio'],
+          'bio': data['bio'] ?? 'No bio provided',
           'city': data['city'] ?? 'Unknown',
-          'relationshipGoal': data['relationshipGoal'] ?? '',
-          'images': data['images'] ?? [],
+          'relationshipGoal': data['relationshipGoal'] ?? 'Not specified',
+          'images': (data['images'] as List?)?.isNotEmpty == true
+              ? (data['images'] as List).take(3).toList()
+              : ['https://i.pravatar.cc/300'],
           'location': data['location'],
           'fullProfile': {
             ...data,
-            'id': userId,
+            'id': profileUserId,
           },
-          'distance': _calculateDistance(
-            data['location']?['latitude'],
-            data['location']?['longitude'],
-            currentUserProfile?['location']?['latitude'],
-            currentUserProfile?['location']?['longitude'],
-          ),
+          'distance': distance,
           'compatibilityScore': compatibilityScore,
         };
 
         users.add(profile);
-        debugPrint('Added profile: ${profile['name']} from ${profile['city']}');
+        debugPrint('Added profile: ${profile['name']} from ${profile['city']} (ID: $profileUserId)');
       }
 
       users.sort((a, b) => 
         (b['compatibilityScore'] as double).compareTo(a['compatibilityScore'] as double)
       );
 
+      debugPrint('Returning ${users.length} profiles for swiping');
       return users;
     } on FirebaseException catch (e) {
       debugPrint('Firebase error getting users: ${e.code} - ${e.message}');

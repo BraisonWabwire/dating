@@ -1,4 +1,6 @@
 import 'dart:convert'; // Required for base64 decoding
+import 'package:dating/ChatsListPage.dart';
+import 'package:dating/chat_page.dart';
 import 'package:dating/services/auth_service.dart';
 import 'package:dating/services/profile_service.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +15,7 @@ class Profiles extends StatefulWidget {
 
 class _ProfilesState extends State<Profiles> {
   final ProfileService _profileService = ProfileService();
+  final AuthService _authService = AuthService();
   List<Map<String, dynamic>> profiles = [];
   List<Map<String, dynamic>> swiperItems = []; // Flattened list for Swiper
   bool isLoading = true;
@@ -25,6 +28,7 @@ class _ProfilesState extends State<Profiles> {
 
   // Fetch profiles and prepare swiper items
   Future<void> _fetchProfiles() async {
+    if (!mounted) return; // Check before starting
     setState(() {
       isLoading = true;
     });
@@ -35,11 +39,9 @@ class _ProfilesState extends State<Profiles> {
         maxDistance: 100.0,
       );
 
-      // Flatten profiles to create swiper items (up to 3 images per profile)
       List<Map<String, dynamic>> tempSwiperItems = [];
       for (var profile in fetchedProfiles) {
         final images = (profile['images'] as List?) ?? [];
-        // Take up to 3 images, or use fallback if empty
         final profileImages = images.isNotEmpty
             ? images.take(3).toList()
             : ['https://i.pravatar.cc/300'];
@@ -51,11 +53,12 @@ class _ProfilesState extends State<Profiles> {
             'bio': profile['bio'],
             'city': profile['city'],
             'relationshipGoal': profile['relationshipGoal'],
-            'imageCount': profileImages.length, // Track number of images
+            'imageCount': profileImages.length,
           });
         }
       }
 
+      if (!mounted) return; // Check before updating state
       setState(() {
         profiles = fetchedProfiles;
         swiperItems = tempSwiperItems;
@@ -63,47 +66,63 @@ class _ProfilesState extends State<Profiles> {
       });
     } catch (e) {
       debugPrint('Error fetching profiles: $e');
+      if (!mounted) return; // Check before updating state
       setState(() {
         isLoading = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to load profiles: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load profiles: $e')),
+      );
     }
   }
 
   // Handle like action for the entire profile
   Future<void> _handleLike(String toUserId) async {
+    if (_authService.currentUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to like profiles')),
+      );
+      Navigator.pushNamed(context, '/login');
+      return;
+    }
+
     try {
       final success = await _profileService.saveLike(toUserId);
       if (success) {
         final isMutual = await _profileService.checkMutualLike(toUserId);
         if (isMutual) {
           await _profileService.createMatch(toUserId);
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Match created!')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('It\'s a match! You can now chat.')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Like saved! Waiting for their like.')),
+          );
         }
+        _removeProfile(toUserId);
       } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Failed to save like')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save like')),
+        );
       }
     } catch (e) {
       debugPrint('Error handling like: $e');
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     }
   }
 
   // Handle dislike action for the entire profile
   void _handleDislike(String toUserId) {
     debugPrint('Disliked user: $toUserId');
+    _removeProfile(toUserId);
   }
 
   // Remove all images for a profile from swiperItems
   void _removeProfile(String profileId) {
+    if (!mounted) return; // Check before updating state
     setState(() {
       swiperItems.removeWhere((item) => item['profileId'] == profileId);
       profiles.removeWhere((profile) => profile['id'] == profileId);
@@ -130,17 +149,16 @@ class _ProfilesState extends State<Profiles> {
             tooltip: 'Log out',
             onPressed: () async {
               try {
-                final authService = AuthService();
-                await authService.signOut();
+                await _authService.signOut();
                 Navigator.pushNamedAndRemoveUntil(
                   context,
                   '/login',
                   (route) => false,
                 );
               } catch (e) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('Logout failed: $e')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Logout failed: $e')),
+                );
               }
             },
           ),
@@ -149,228 +167,230 @@ class _ProfilesState extends State<Profiles> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : swiperItems.isEmpty
-          ? const Center(child: Text('No profiles available'))
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 40),
-                  child: Swiper(
-                    itemCount: swiperItems.length,
-                    itemBuilder: (BuildContext context, int index) {
-                      final item = swiperItems[index];
-                      final imageUrl = item['image'];
-                      debugPrint(
-                        'Loading image for ${item['name']}: $imageUrl',
-                      );
+              ? const Center(child: Text('No profiles available'))
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 40),
+                      child: Swiper(
+                        itemCount: swiperItems.length,
+                        itemBuilder: (BuildContext context, int index) {
+                          final item = swiperItems[index];
+                          final imageUrl = item['image'];
+                          debugPrint('Loading image for ${item['name']}: $imageUrl');
 
-                      Widget imageWidget;
-                      if (imageUrl.startsWith('data:image/')) {
-                        // Handle base64 image
-                        try {
-                          final base64Data = imageUrl.split(',').last;
-                          final imageBytes = base64Decode(base64Data);
-                          imageWidget = Image.memory(
-                            imageBytes,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              debugPrint(
-                                'Base64 image load error for ${item['name']}: $error',
+                          Widget imageWidget;
+                          if (imageUrl.startsWith('data:image/')) {
+                            try {
+                              final base64Data = imageUrl.split(',').last;
+                              final imageBytes = base64Decode(base64Data);
+                              imageWidget = Image.memory(
+                                imageBytes,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  debugPrint('Base64 image load error for ${item['name']}: $error');
+                                  return Container(
+                                    color: Colors.grey,
+                                    child: const Center(
+                                      child: Icon(Icons.error, color: Colors.white),
+                                    ),
+                                  );
+                                },
                               );
-                              return Container(
+                            } catch (e) {
+                              debugPrint('Base64 decode error for ${item['name']}: $e');
+                              imageWidget = Container(
                                 color: Colors.grey,
                                 child: const Center(
                                   child: Icon(Icons.error, color: Colors.white),
                                 ),
                               );
-                            },
-                          );
-                        } catch (e) {
-                          debugPrint(
-                            'Base64 decode error for ${item['name']}: $e',
-                          );
-                          imageWidget = Container(
-                            color: Colors.grey,
-                            child: const Center(
-                              child: Icon(Icons.error, color: Colors.white),
-                            ),
-                          );
-                        }
-                      } else {
-                        // Handle network image
-                        imageWidget = Image.network(
-                          imageUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            debugPrint(
-                              'Network image load error for $imageUrl: $error',
+                            }
+                          } else {
+                            imageWidget = Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                debugPrint('Network image load error for $imageUrl: $error');
+                                return Container(
+                                  color: Colors.grey,
+                                  child: const Center(
+                                    child: Icon(Icons.error, color: Colors.white),
+                                  ),
+                                );
+                              },
                             );
-                            return Container(
-                              color: Colors.grey,
-                              child: const Center(
-                                child: Icon(Icons.error, color: Colors.white),
-                              ),
-                            );
-                          },
-                        );
-                      }
+                          }
 
-                      return Card(
-                        elevation: 8,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ClipRRect(
+                          return Card(
+                            elevation: 8,
+                            shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(20),
-                              child: imageWidget,
                             ),
-                            Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(20),
-                                gradient: LinearGradient(
-                                  begin: Alignment.bottomCenter,
-                                  end: Alignment.topCenter,
-                                  colors: [
-                                    const Color.fromRGBO(0, 0, 0, 0.7),
-                                    Colors.transparent,
-                                  ],
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: imageWidget,
                                 ),
-                              ),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(20),
+                                    gradient: LinearGradient(
+                                      begin: Alignment.bottomCenter,
+                                      end: Alignment.topCenter,
+                                      colors: [
+                                        const Color.fromRGBO(0, 0, 0, 0.7),
+                                        Colors.transparent,
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  bottom: 20,
+                                  left: 20,
+                                  right: 20,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item['name'] ?? 'Unknown',
+                                        style: const TextStyle(
+                                          fontSize: 28,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        item['bio'] ?? 'No bio available',
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        item['city'] ?? 'Unknown City',
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Goal: ${item['relationshipGoal'] ?? 'Not specified'}',
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
-                            Positioned(
-                              bottom: 20,
-                              left: 20,
-                              right: 20,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item['name'] ?? 'Unknown',
-                                    style: const TextStyle(
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    item['bio'] ?? 'No bio available',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    item['city'] ?? 'Unknown City',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Goal: ${item['relationshipGoal'] ?? 'Not specified'}',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    itemWidth: MediaQuery.of(context).size.width * 0.9,
-                    itemHeight: MediaQuery.of(context).size.height * 0.6,
-                    layout: SwiperLayout.STACK,
-                    onIndexChanged: (index) {
-                      // Check if we've reached the last image of the current profile
-                      if (index < swiperItems.length) {
-                        final item = swiperItems[index];
-                        final profileId = item['profileId'];
-                        final imageCount = item['imageCount'];
-                        // Count how many images of this profile have been shown
-                        final shownImages = swiperItems
-                            .sublist(0, index + 1)
-                            .where((i) => i['profileId'] == profileId)
-                            .length;
-                        if (shownImages >= imageCount) {
-                          // Last image of the profile; next swipe will move to new profile
-                          debugPrint(
-                            'Reached last image for profile $profileId',
                           );
-                        }
-                      }
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 30),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      ElevatedButton(
-                        onPressed: () {
-                          if (swiperItems.isNotEmpty) {
-                            final profileId = swiperItems[0]['profileId'];
-                            _handleDislike(profileId);
-                            _removeProfile(profileId);
+                        },
+                        itemWidth: MediaQuery.of(context).size.width * 0.9,
+                        itemHeight: MediaQuery.of(context).size.height * 0.6,
+                        layout: SwiperLayout.STACK,
+                        onIndexChanged: (index) {
+                          if (index < swiperItems.length) {
+                            final item = swiperItems[index];
+                            final profileId = item['profileId'];
+                            final imageCount = item['imageCount'];
+                            final shownImages = swiperItems
+                                .sublist(0, index + 1)
+                                .where((i) => i['profileId'] == profileId)
+                                .length;
+                            if (shownImages >= imageCount) {
+                              debugPrint('Reached last image for profile $profileId');
+                            }
                           }
                         },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          shape: const CircleBorder(),
-                          padding: const EdgeInsets.all(16),
-                        ),
-                        child: const Icon(
-                          Icons.close,
-                          color: Colors.white,
-                          size: 30,
-                        ),
                       ),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (swiperItems.isNotEmpty) {
-                            final profileId = swiperItems[0]['profileId'];
-                            _handleLike(profileId);
-                            _removeProfile(profileId);
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFF06292),
-                          shape: const CircleBorder(),
-                          padding: const EdgeInsets.all(16),
-                        ),
-                        child: const Icon(
-                          Icons.favorite,
-                          color: Colors.white,
-                          size: 30,
-                        ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 30),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton(
+                            onPressed: () {
+                              if (swiperItems.isNotEmpty) {
+                                final profileId = swiperItems[0]['profileId'];
+                                _handleDislike(profileId);
+                                _removeProfile(profileId);
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              shape: const CircleBorder(),
+                              padding: const EdgeInsets.all(16),
+                            ),
+                            child: const Icon(
+                              Icons.close,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                          ),
+                          ElevatedButton(
+                            onPressed: () {
+                              if (swiperItems.isNotEmpty) {
+                                final profileId = swiperItems[0]['profileId'];
+                                _handleLike(profileId);
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFF06292),
+                              shape: const CircleBorder(),
+                              padding: const EdgeInsets.all(16),
+                            ),
+                            child: const Icon(
+                              Icons.favorite,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                          ),
+                          ElevatedButton(
+                            onPressed: () async {
+                              if (swiperItems.isNotEmpty) {
+                                final profileId = swiperItems[0]['profileId'];
+                                final isMutual = await _profileService.checkMutualLike(profileId);
+                                if (isMutual) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ChatPage(
+                                        toUserId: profileId,
+                                        matchName: swiperItems[0]['name'],
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('You can only chat with mutual matches')),
+                                  );
+                                }
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFF06292),
+                              shape: const CircleBorder(),
+                              padding: const EdgeInsets.all(16),
+                            ),
+                            child: const Icon(
+                              Icons.mail_outline,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                          ),
+                        ],
                       ),
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.pushNamed(context, '/Chat_page');
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFF06292),
-                          shape: const CircleBorder(),
-                          padding: const EdgeInsets.all(16),
-                        ),
-                        child: const Icon(
-                          Icons.mail_outline,
-                          color: Colors.white,
-                          size: 30,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
       bottomNavigationBar: BottomAppBar(
         color: const Color(0xFFE91E63),
         child: Padding(
@@ -405,13 +425,11 @@ class _ProfilesState extends State<Profiles> {
               ),
               GestureDetector(
                 onTap: () {
-                  Navigator.pushNamed(
+                  Navigator.push(
                     context,
-                    '/Chat_page',
-                    arguments: {
-                      'toUserId': swiperItems[0]['profileId'],
-                      'matchName': swiperItems[0]['name'],
-                    },
+                    MaterialPageRoute(
+                      builder: (context) => const ChatsListPage(),
+                    ),
                   );
                 },
                 child: const Column(

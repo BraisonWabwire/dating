@@ -446,9 +446,9 @@ class _ProfilesState extends State<Profiles> {
               const Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.search, color: Colors.white, size: 30),
+                  Icon(Icons.people, color: Colors.white, size: 30),
                   Text(
-                    "Search",
+                    "matches",
                     style: TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ],

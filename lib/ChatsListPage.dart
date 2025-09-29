@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dating/chat_page.dart';
 import 'package:dating/services/auth_service.dart';
 import 'package:dating/services/profile_service.dart';
@@ -49,9 +48,9 @@ class _ChatsListPageState extends State<ChatsListPage> {
       setState(() {
         isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load matches: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load matches: $e')));
     }
   }
 
@@ -77,107 +76,113 @@ class _ChatsListPageState extends State<ChatsListPage> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : matches.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.chat_bubble_outline,
-                        size: 64,
-                        color: Color(0xFFCCCCCC),
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'No matches yet. Keep swiping!',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Color(0xFF999999),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline,
+                    size: 64,
+                    color: Color(0xFFCCCCCC),
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: matches.length,
-                  itemBuilder: (context, index) {
-                    final match = matches[index];
-                    final imageUrl = match['image'] ?? 'https://i.pravatar.cc/300';
+                  SizedBox(height: 16),
+                  Text(
+                    'No matches yet. Keep swiping!',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Color(0xFF999999),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: matches.length,
+              itemBuilder: (context, index) {
+                final match = matches[index];
+                final imageUrl = match['image'] ?? 'https://i.pravatar.cc/300';
 
-                    Widget imageWidget;
-                    if (imageUrl.startsWith('data:image/')) {
-                      try {
-                        final base64Data = imageUrl.split(',').last;
-                        final imageBytes = base64Decode(base64Data);
-                        imageWidget = Image.memory(
-                          imageBytes,
-                          width: 50,
-                          height: 50,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            debugPrint('Base64 image load error for ${match['name']}: $error');
-                            return const Icon(Icons.error, color: Colors.grey);
-                          },
+                Widget imageWidget;
+                if (imageUrl.startsWith('data:image/')) {
+                  try {
+                    final base64Data = imageUrl.split(',').last;
+                    final imageBytes = base64Decode(base64Data);
+                    imageWidget = Image.memory(
+                      imageBytes,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        debugPrint(
+                          'Base64 image load error for ${match['name']}: $error',
                         );
-                      } catch (e) {
-                        debugPrint('Base64 decode error for ${match['name']}: $e');
-                        imageWidget = const Icon(Icons.error, color: Colors.grey);
-                      }
-                    } else {
-                      imageWidget = Image.network(
-                        imageUrl,
-                        width: 50,
-                        height: 50,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          debugPrint('Network image load error for $imageUrl: $error');
-                          return const Icon(Icons.error, color: Colors.grey);
-                        },
-                      );
-                    }
-
-                    return Card(
-                      elevation: 4,
-                      margin: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          radius: 25,
-                          child: ClipOval(child: imageWidget),
-                          backgroundColor: Colors.grey[200],
-                        ),
-                        title: Text(
-                          match['name'] ?? 'Unknown',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        subtitle: Text(
-                          match['lastMessage'] ?? 'Start a conversation',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: match['lastMessage'] != null ? Colors.black54 : Colors.grey,
-                          ),
-                        ),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => ChatPage(
-                                toUserId: match['userId'],
-                                matchName: match['name'],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                        return const Icon(Icons.error, color: Colors.grey);
+                      },
                     );
-                  },
-                ),
+                  } catch (e) {
+                    debugPrint('Base64 decode error for ${match['name']}: $e');
+                    imageWidget = const Icon(Icons.error, color: Colors.grey);
+                  }
+                } else {
+                  imageWidget = Image.network(
+                    imageUrl,
+                    width: 50,
+                    height: 50,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      debugPrint(
+                        'Network image load error for $imageUrl: $error',
+                      );
+                      return const Icon(Icons.error, color: Colors.grey);
+                    },
+                  );
+                }
+
+                return Card(
+                  elevation: 4,
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      radius: 25,
+                      child: ClipOval(child: imageWidget),
+                      backgroundColor: Colors.grey[200],
+                    ),
+                    title: Text(
+                      match['name'] ?? 'Unknown',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      match['lastMessage'] ?? 'Start a conversation',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: match['lastMessage'] != null
+                            ? Colors.black54
+                            : Colors.grey,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatPage(
+                            toUserId: match['userId'],
+                            matchName: match['name'],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
     );
   }
 }

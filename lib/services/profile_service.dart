@@ -8,55 +8,55 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
 class ProfileService {
+  // Firebase Instances
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Get current user ID
+  // Current User ID
   String? get currentUserId => _auth.currentUser?.uid;
 
-  // Get current location
+  // ==================================================================
+  // LOCATION: Get current location + city name
+  // ==================================================================
   Future<Map<String, dynamic>?> getCurrentLocationWithCity() async {
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        debugPrint('Location services are disabled.');
+        debugPrint('Location services disabled');
         return null;
       }
 
-      LocationPermission permission = await Geolocator.checkPermission();
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          debugPrint('Location permissions are denied');
+          debugPrint('Location permission denied');
           return null;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
-        debugPrint('Location permissions are permanently denied');
+        debugPrint('Location permission permanently denied');
         return null;
       }
 
-      Position position = await Geolocator.getCurrentPosition(
+      final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
 
-      String? cityName;
+      String? cityName = 'Unknown City';
       try {
-        List<Placemark> placemarks = await placemarkFromCoordinates(
+        final placemarks = await placemarkFromCoordinates(
           position.latitude,
           position.longitude,
         );
         if (placemarks.isNotEmpty) {
-          Placemark place = placemarks[0];
-          cityName = place.locality ?? place.administrativeArea ?? 'Unknown City';
-        } else {
-          cityName = 'Unknown City';
+          final place = placemarks[0];
+          cityName = place.locality ?? place.administrativeArea ?? cityName;
         }
       } catch (e) {
-        debugPrint('Error getting city name: $e');
-        cityName = 'Unknown City';
+        debugPrint('Geocoding error: $e');
       }
 
       return {
@@ -65,48 +65,69 @@ class ProfileService {
         'city': cityName,
       };
     } catch (e) {
-      debugPrint('Error getting location: $e');
+      debugPrint('Location error: $e');
       return null;
     }
   }
 
-  // Upload single image to Firebase Storage
+  // ==================================================================
+  // IMAGE UPLOAD: Upload single image to Firebase Storage
+  // ==================================================================
   Future<String?> _uploadImage(File imageFile, String userId) async {
     try {
+      if (!await imageFile.exists()) {
+        debugPrint('Image file does not exist: ${imageFile.path}');
+        return null;
+      }
+
       final fileName = 'profile_images/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
       final ref = _storage.ref().child(fileName);
+
+      debugPrint('Uploading image: ${imageFile.path} → $fileName');
       final uploadTask = ref.putFile(imageFile);
-      final snapshot = await uploadTask;
+      final snapshot = await uploadTask.whenComplete(() {});
+
       final downloadUrl = await snapshot.ref.getDownloadURL();
+      debugPrint('Image uploaded: $downloadUrl');
       return downloadUrl;
+    } on FirebaseException catch (e) {
+      debugPrint('Firebase Storage Error [${e.code}]: ${e.message}');
+      return null;
     } catch (e) {
-      debugPrint('Error uploading image: $e');
+      debugPrint('Unexpected upload error: $e');
       return null;
     }
   }
 
-  // Upload multiple images
+  // ==================================================================
+  // IMAGE UPLOAD: Upload up to 3 images
+  // ==================================================================
   Future<List<String>> _uploadImages(List<File?> images, String userId) async {
-    List<String> imageUrls = [];
-    
+    final List<String> urls = [];
+
     for (int i = 0; i < images.length && i < 3; i++) {
-      if (images[i] != null) {
-        final url = await _uploadImage(images[i]!, userId);
+      final file = images[i];
+      if (file != null && await file.exists()) {
+        final url = await _uploadImage(file, userId);
         if (url != null) {
-          imageUrls.add(url);
+          urls.add(url);
         }
       }
     }
-    
-    // If no images are uploaded, provide a default image
-    if (imageUrls.isEmpty) {
-      imageUrls.add('https://i.pravatar.cc/300');
+
+    // Always return at least one image
+    if (urls.isEmpty) {
+      final defaultUrl = 'https://i.pravatar.cc/300?u=$userId';
+      debugPrint('No images uploaded → using default: $defaultUrl');
+      urls.add(defaultUrl);
     }
-    
-    return imageUrls;
+
+    return urls;
   }
 
-  // Save profile to Firestore
+  // ==================================================================
+  // SAVE PROFILE: Create or update user profile
+  // ==================================================================
   Future<bool> saveProfile({
     required String firstName,
     required String lastName,
@@ -119,24 +140,34 @@ class ProfileService {
     try {
       final userId = currentUserId;
       if (userId == null) {
-        debugPrint('No user logged in');
+        debugPrint('saveProfile: No user logged in');
         return false;
       }
 
+      debugPrint('Saving profile for user: $userId');
+
+      // Upload images
       final imageUrls = await _uploadImages(images, userId);
+
+      // Build profile data with fallbacks
+      final cleanFirstName = firstName.trim().isNotEmpty ? firstName.trim() : 'User';
+      final cleanLastName = lastName.trim();
+      final fullName = '$cleanFirstName $cleanLastName'.trim();
 
       final profileData = {
         'userId': userId,
-        'firstName': firstName.isNotEmpty ? firstName : 'Anonymous',
-        'lastName': lastName.isNotEmpty ? lastName : '',
-        'fullName': '${firstName.isNotEmpty ? firstName : 'Anonymous'} ${lastName.isNotEmpty ? lastName : ''}'.trim(),
-        'bio': bio.isNotEmpty ? bio : 'No bio provided',
-        'relationshipGoal': relationshipGoal.isNotEmpty ? relationshipGoal : 'Not specified',
+        'firstName': cleanFirstName,
+        'lastName': cleanLastName,
+        'fullName': fullName.isNotEmpty ? fullName : 'User',
+        'bio': bio.trim().isNotEmpty ? bio.trim() : 'Hey, I\'m using the app!',
+        'relationshipGoal':
+            relationshipGoal.trim().isNotEmpty ? relationshipGoal.trim() : 'Open to anything',
         'images': imageUrls,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
+      // Add location
       if (locationWithCity != null) {
         profileData['location'] = {
           'latitude': locationWithCity['latitude'],
@@ -147,71 +178,68 @@ class ProfileService {
         profileData['city'] = city ?? 'Unknown City';
       }
 
+      // Save to Firestore
       await _firestore
           .collection('users')
           .doc(userId)
           .set(profileData, SetOptions(merge: true));
 
-      debugPrint('Profile saved successfully for user: $userId');
-      debugPrint('Profile data: $profileData');
+      debugPrint('Profile saved: $fullName | Images: ${imageUrls.length}');
       return true;
     } catch (e) {
-      debugPrint('Error saving profile: $e');
+      debugPrint('saveProfile error: $e');
       return false;
     }
   }
 
-  // Get user profile
+  // ==================================================================
+  // GET USER PROFILE
+  // ==================================================================
   Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
       final doc = await _firestore.collection('users').doc(userId).get();
       if (doc.exists) {
-        return doc.data();
+        return doc.data() as Map<String, dynamic>;
       }
-      debugPrint('Profile not found for user: $userId');
+      debugPrint('Profile not found: $userId');
       return null;
     } catch (e) {
-      debugPrint('Error getting profile: $e');
+      debugPrint('getUserProfile error: $e');
       return null;
     }
   }
 
-  // Update specific profile fields
+  // ==================================================================
+  // UPDATE PROFILE FIELD
+  // ==================================================================
   Future<bool> updateProfileField({
     required String field,
     required dynamic value,
   }) async {
     try {
       final userId = currentUserId;
-      if (userId == null) {
-        debugPrint('No user logged in');
-        return false;
-      }
+      if (userId == null) return false;
 
-      await _firestore
-          .collection('users')
-          .doc(userId)
-          .update({
+      await _firestore.collection('users').doc(userId).update({
         field: value,
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      debugPrint('Profile field $field updated successfully');
+      debugPrint('Updated $field for $userId');
       return true;
     } catch (e) {
-      debugPrint('Error updating profile field: $e');
+      debugPrint('updateProfileField error: $e');
       return false;
     }
   }
 
-  // Save like to Firestore
+  // ==================================================================
+  // SAVE LIKE
+  // ==================================================================
   Future<bool> saveLike(String toUserId) async {
     try {
       final userId = currentUserId;
-      if (userId == null) {
-        debugPrint('No user logged in');
-        return false;
-      }
+      if (userId == null) return false;
 
       final likeId = _generateSortedId(userId, toUserId);
       final likeData = {
@@ -221,54 +249,48 @@ class ProfileService {
       };
 
       await _firestore.collection('likes').doc(likeId).set(likeData);
-      debugPrint('Like saved: $userId -> $toUserId');
+      debugPrint('Like saved: $userId → $toUserId');
       return true;
     } catch (e) {
-      debugPrint('Error saving like: $e');
+      debugPrint('saveLike error: $e');
       return false;
     }
   }
 
-  // Check for mutual like
+  // ==================================================================
+  // CHECK MUTUAL LIKE
+  // ==================================================================
   Future<bool> checkMutualLike(String otherUserId) async {
     try {
       final userId = currentUserId;
-      if (userId == null) {
-        debugPrint('No user logged in');
-        return false;
-      }
+      if (userId == null) return false;
 
-      final userLikeDoc = await _firestore
+      final userLike = await _firestore
           .collection('likes')
           .doc(_generateSortedId(userId, otherUserId))
           .get();
 
-      if (!userLikeDoc.exists) {
-        debugPrint('No like from $userId to $otherUserId');
-        return false;
-      }
+      if (!userLike.exists) return false;
 
-      final mutualLikeDoc = await _firestore
+      final otherLike = await _firestore
           .collection('likes')
           .doc(_generateSortedId(otherUserId, userId))
           .get();
 
-      debugPrint('Mutual like check: ${mutualLikeDoc.exists}');
-      return mutualLikeDoc.exists;
+      return otherLike.exists;
     } catch (e) {
-      debugPrint('Error checking mutual like: $e');
+      debugPrint('checkMutualLike error: $e');
       return false;
     }
   }
 
-  // Create a match
+  // ==================================================================
+  // CREATE MATCH
+  // ==================================================================
   Future<bool> createMatch(String otherUserId) async {
     try {
       final userId = currentUserId;
-      if (userId == null) {
-        debugPrint('No user logged in');
-        return false;
-      }
+      if (userId == null) return false;
 
       final matchId = _generateSortedId(userId, otherUserId);
       final matchData = {
@@ -282,58 +304,55 @@ class ProfileService {
       debugPrint('Match created: $matchId');
       return true;
     } catch (e) {
-      debugPrint('Error creating match: $e');
+      debugPrint('createMatch error: $e');
       return false;
     }
   }
 
-  // Get mutual matches
+  // ==================================================================
+  // GET MUTUAL MATCHES (for ChatsListPage)
+  // ==================================================================
   Future<List<Map<String, dynamic>>> getMutualMatches() async {
     try {
       final userId = currentUserId;
-      if (userId == null) {
-        debugPrint('No user logged in');
-        return [];
-      }
+      if (userId == null) return [];
 
       final snapshot = await _firestore
           .collection('matches')
           .where('userIds', arrayContains: userId)
           .get();
 
-      List<Map<String, dynamic>> matches = [];
+      final List<Map<String, dynamic>> matches = [];
+
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        final otherUserId = (data['userIds'] as List).firstWhere((id) => id != userId);
-        final profile = await getUserProfile(otherUserId);
+        final otherId = (data['userIds'] as List).firstWhere((id) => id != userId);
+        final profile = await getUserProfile(otherId);
+
         if (profile != null) {
           matches.add({
-            'userId': otherUserId,
+            'userId': otherId,
             'name': profile['fullName'] ?? 'Unknown',
-            'image': (profile['images'] as List?)?.isNotEmpty ?? false
+            'image': (profile['images'] as List?)?.isNotEmpty == true
                 ? profile['images'][0]
-                : 'https://i.pravatar.cc/300',
+                : 'https://i.pravatar.cc/300?u=$otherId',
             'lastMessage': data['lastMessage'],
             'lastMessageTime': data['lastMessageTime'],
           });
         }
       }
 
-      debugPrint('Fetched ${matches.length} mutual matches');
+      debugPrint('Loaded ${matches.length} mutual matches');
       return matches;
     } catch (e) {
-      debugPrint('Error fetching mutual matches: $e');
+      debugPrint('getMutualMatches error: $e');
       return [];
     }
   }
 
-  // Generate sorted ID
-  String _generateSortedId(String userId1, String userId2) {
-    final ids = [userId1, userId2]..sort();
-    return '${ids[0]}_${ids[1]}';
-  }
-
-  // Get all users for swiping with matching criteria
+  // ==================================================================
+  // GET USERS FOR SWIPING
+  // ==================================================================
   Future<List<Map<String, dynamic>>> getAllUsersForSwiping({
     int limit = 20,
     bool includeDistanceFilter = false,
@@ -341,163 +360,143 @@ class ProfileService {
   }) async {
     try {
       final userId = currentUserId;
-      if (userId == null) {
-        debugPrint('No current user for swiping');
+      if (userId == null) return [];
+
+      final currentProfile = await getUserProfile(userId);
+      if (currentProfile == null) {
+        debugPrint('Current user profile missing');
         return [];
       }
 
-      debugPrint('Fetching users for swiping (limit: $limit)...');
-
-      final currentUserProfile = await getUserProfile(userId);
-
-      Query query = _firestore
+      final query = _firestore
           .collection('users')
           .where('userId', isNotEqualTo: userId)
           .limit(limit);
 
-      final QuerySnapshot snapshot = await query.get();
-      debugPrint('Found ${snapshot.docs.length} users in total');
+      final snapshot = await query.get();
+      debugPrint('Found ${snapshot.docs.length} potential profiles');
 
-      List<Map<String, dynamic>> users = [];
+      final List<Map<String, dynamic>> users = [];
 
       for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final profileUserId = doc.id;
+        final data = doc.data();
+        final profileId = doc.id;
 
-        // Relaxed completeness check
-        if (data['fullName'] == null) {
-          debugPrint('Skipping profile $profileUserId: missing fullName');
+        // Required: fullName + at least one image
+        final images = (data['images'] as List?) ?? [];
+        if (data['fullName'] == null || images.isEmpty) {
+          debugPrint('Skipping $profileId: missing name or image');
           continue;
         }
 
-        // Check if user has already liked this profile
+        // Skip if already liked
         try {
           final likeDoc = await _firestore
               .collection('likes')
-              .doc(_generateSortedId(userId, profileUserId))
+              .doc(_generateSortedId(userId, profileId))
               .get();
           if (likeDoc.exists) {
-            debugPrint('Skipping already liked profile: $profileUserId');
+            debugPrint('Already liked: $profileId');
             continue;
           }
         } catch (e) {
-          debugPrint('No likes collection or document for $profileUserId, treating as not liked: $e');
+          debugPrint('Likes check failed (OK): $e');
         }
 
-        double compatibilityScore = _calculateCompatibilityScore(
-          currentUserProfile,
-          data,
-        );
-
-        double distance = _calculateDistance(
+        // Distance
+        final distance = _calculateDistance(
           data['location']?['latitude'],
           data['location']?['longitude'],
-          currentUserProfile?['location']?['latitude'],
-          currentUserProfile?['location']?['longitude'],
+          currentProfile['location']?['latitude'],
+          currentProfile['location']?['longitude'],
         );
 
         if (includeDistanceFilter && distance > maxDistance) {
-          debugPrint('Skipping profile $profileUserId due to distance: $distance km');
+          debugPrint('Too far: $profileId ($distance km)');
           continue;
         }
 
-        final profile = {
-          'id': profileUserId,
-          'name': data['fullName'] ?? 'Unknown',
+        // Add to swipe list
+        users.add({
+          'id': profileId,
+          'name': data['fullName'],
           'firstName': data['firstName'] ?? '',
           'lastName': data['lastName'] ?? '',
-          'bio': data['bio'] ?? 'No bio provided',
+          'bio': data['bio'] ?? 'No bio',
           'city': data['city'] ?? 'Unknown',
-          'relationshipGoal': data['relationshipGoal'] ?? 'Not specified',
-          'images': (data['images'] as List?)?.isNotEmpty == true
-              ? (data['images'] as List).take(3).toList()
-              : ['https://i.pravatar.cc/300'],
+          'relationshipGoal': data['relationshipGoal'] ?? '',
+          'images': images.take(3).toList(),
           'location': data['location'],
-          'fullProfile': {
-            ...data,
-            'id': profileUserId,
-          },
           'distance': distance,
-          'compatibilityScore': compatibilityScore,
-        };
-
-        users.add(profile);
-        debugPrint('Added profile: ${profile['name']} from ${profile['city']} (ID: $profileUserId)');
+          'compatibilityScore': _calculateCompatibilityScore(currentProfile, data),
+        });
       }
 
-      users.sort((a, b) => 
-        (b['compatibilityScore'] as double).compareTo(a['compatibilityScore'] as double)
-      );
+      // Sort by compatibility
+      users.sort((a, b) => (b['compatibilityScore'] as double)
+          .compareTo(a['compatibilityScore'] as double));
 
-      debugPrint('Returning ${users.length} profiles for swiping');
+      debugPrint('Returning ${users.length} swipeable profiles');
       return users;
-    } on FirebaseException catch (e) {
-      debugPrint('Firebase error getting users: ${e.code} - ${e.message}');
-      return [];
     } catch (e) {
-      debugPrint('Error getting users for swiping: $e');
+      debugPrint('getAllUsersForSwiping error: $e');
       return [];
     }
   }
 
-  // Calculate compatibility score
+  // ==================================================================
+  // HELPER: Generate sorted ID (e.g., "abc_xyz")
+  // ==================================================================
+  String _generateSortedId(String id1, String id2) {
+    final ids = [id1, id2]..sort();
+    return '${ids[0]}_${ids[1]}';
+  }
+
+  // ==================================================================
+  // HELPER: Calculate compatibility score
+  // ==================================================================
   double _calculateCompatibilityScore(
-    Map<String, dynamic>? currentUser,
-    Map<String, dynamic> otherUser,
+    Map<String, dynamic>? current,
+    Map<String, dynamic> other,
   ) {
+    if (current == null) return 0.0;
+
     double score = 0.0;
 
-    if (currentUser == null) return score;
-
-    final currentGoal = currentUser['relationshipGoal']?.toString().toLowerCase();
-    final otherGoal = otherUser['relationshipGoal']?.toString().toLowerCase();
-    if (currentGoal != null && otherGoal != null && currentGoal == otherGoal) {
-      score += 0.5;
-    }
+    final goal1 = current['relationshipGoal']?.toString().toLowerCase();
+    final goal2 = other['relationshipGoal']?.toString().toLowerCase();
+    if (goal1 == goal2 && goal1 != null) score += 0.5;
 
     final distance = _calculateDistance(
-      otherUser['location']?['latitude'],
-      otherUser['location']?['longitude'],
-      currentUser['location']?['latitude'],
-      currentUser['location']?['longitude'],
+      other['location']?['latitude'],
+      other['location']?['longitude'],
+      current['location']?['latitude'],
+      current['location']?['longitude'],
     );
-    if (distance < 50.0) {
-      score += 0.3 * (1 - (distance / 50.0));
-    }
+    if (distance < 50) score += 0.3 * (1 - distance / 50);
 
     return score;
   }
 
-  // Calculate distance between users
+  // ==================================================================
+  // HELPER: Haversine distance
+  // ==================================================================
   double _calculateDistance(
-    dynamic otherLat,
-    dynamic otherLng,
-    dynamic currentLat,
-    dynamic currentLng,
+    dynamic lat1,
+    dynamic lng1,
+    dynamic lat2,
+    dynamic lng2,
   ) {
-    try {
-      if (otherLat == null || otherLng == null || currentLat == null || currentLng == null) {
-        return 999.0;
-      }
+    if (lat1 == null || lng1 == null || lat2 == null || lng2 == null) return 999;
 
-      const double earthRadius = 6371;
-      final double dLat = _degreesToRadians(otherLat - currentLat);
-      final double dLng = _degreesToRadians(otherLng - currentLng);
-      
-      final double a = sin(dLat / 2) * sin(dLat / 2) +
-                      cos(_degreesToRadians(currentLat)) * cos(_degreesToRadians(otherLat)) * 
-                      sin(dLng / 2) * sin(dLng / 2);
-      final double c = 2 * asin(sqrt(a));
-      
-      return earthRadius * c;
-    } catch (e) {
-      debugPrint('Error calculating distance: $e');
-      return 999.0;
-    }
+    const R = 6371; // km
+    final dLat = _deg2rad(lat2 - lat1);
+    final dLon = _deg2rad(lng2 - lng1);
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_deg2rad(lat1)) * cos(_deg2rad(lat2)) * sin(dLon / 2) * sin(dLon / 2);
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return R * c;
   }
 
-  // Helper method to convert degrees to radians
-  double _degreesToRadians(double degrees) {
-    return degrees * (pi / 180.0);
-  }
+  double _deg2rad(double deg) => deg * (pi / 180);
 }

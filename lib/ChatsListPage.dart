@@ -149,8 +149,8 @@ class _ChatsListPageState extends State<ChatsListPage> {
                   child: ListTile(
                     leading: CircleAvatar(
                       radius: 25,
-                      child: ClipOval(child: imageWidget),
                       backgroundColor: Colors.grey[200],
+                      child: ClipOval(child: imageWidget),
                     ),
                     title: Text(
                       match['name'] ?? 'Unknown',

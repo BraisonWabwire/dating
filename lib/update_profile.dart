@@ -20,7 +20,7 @@ class _UpdateProfileState extends State<UpdateProfile> {
   // Keep city controller for backend storage, but don't show it in UI
   final TextEditingController _cityController = TextEditingController();
   
-  List<File?> _images = [null, null, null];
+  final List<File?> _images = [null, null, null];
   final ImagePicker _picker = ImagePicker();
   
   // Profile service instance

@@ -83,7 +83,7 @@ class ProfileService {
       final fileName = 'profile_images/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
       final ref = _storage.ref().child(fileName);
 
-      debugPrint('Uploading image: ${imageFile.path} → $fileName');
+      debugPrint('Uploading image: ${imageFile.path} to $fileName');
       final uploadTask = ref.putFile(imageFile);
       final snapshot = await uploadTask.whenComplete(() {});
 
@@ -118,7 +118,7 @@ class ProfileService {
     // Always return at least one image
     if (urls.isEmpty) {
       final defaultUrl = 'https://i.pravatar.cc/300?u=$userId';
-      debugPrint('No images uploaded → using default: $defaultUrl');
+      debugPrint('No images uploaded to using default: $defaultUrl');
       urls.add(defaultUrl);
     }
 
@@ -165,6 +165,10 @@ class ProfileService {
         'images': imageUrls,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
+        'privacySettings': {
+          'showProfileToLikedUsers': true, // Default: allow profile visibility to liked users
+          'showOnlineStatus': true,
+        }
       };
 
       // Add location
@@ -210,6 +214,51 @@ class ProfileService {
   }
 
   // ==================================================================
+  // GET USER PROFILE WITH VISIBILITY CHECK
+  // ==================================================================
+  Future<Map<String, dynamic>?> getUserProfileWithVisibility(String userId) async {
+    try {
+      final currentUserId = this.currentUserId;
+      if (currentUserId == null) return null;
+
+      // Users can always see their own profile
+      if (userId == currentUserId) {
+        return await getUserProfile(userId);
+      }
+
+      final profile = await getUserProfile(userId);
+      if (profile == null) return null;
+
+      // Check if current user has liked this profile OR if this profile has liked current user
+      final hasLiked = await _checkLikeExists(currentUserId, userId);
+      final hasBeenLiked = await _checkLikeExists(userId, currentUserId);
+
+      // Get privacy settings
+      final privacySettings = profile['privacySettings'] as Map<String, dynamic>? ?? {};
+      final showProfileToLikedUsers = privacySettings['showProfileToLikedUsers'] ?? true;
+
+      // Allow profile visibility if:
+      // 1. User has liked this profile OR this profile has liked current user
+      // 2. AND the profile owner allows visibility to liked users
+      if ((hasLiked || hasBeenLiked) && showProfileToLikedUsers) {
+        return profile;
+      }
+
+      // Check if it's a mutual match
+      final isMutualMatch = await checkMutualLike(userId);
+      if (isMutualMatch) {
+        return profile;
+      }
+
+      debugPrint('Profile access denied for $userId - no like relationship');
+      return null;
+    } catch (e) {
+      debugPrint('getUserProfileWithVisibility error: $e');
+      return null;
+    }
+  }
+
+  // ==================================================================
   // UPDATE PROFILE FIELD
   // ==================================================================
   Future<bool> updateProfileField({
@@ -234,7 +283,28 @@ class ProfileService {
   }
 
   // ==================================================================
-  // SAVE LIKE
+  // UPDATE PRIVACY SETTINGS
+  // ==================================================================
+  Future<bool> updatePrivacySettings(Map<String, dynamic> settings) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) return false;
+
+      await _firestore.collection('users').doc(userId).update({
+        'privacySettings': settings,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      debugPrint('Privacy settings updated for $userId');
+      return true;
+    } catch (e) {
+      debugPrint('updatePrivacySettings error: $e');
+      return false;
+    }
+  }
+
+  // ==================================================================
+  // SAVE LIKE (with notification and visibility)
   // ==================================================================
   Future<bool> saveLike(String toUserId) async {
     try {
@@ -246,14 +316,242 @@ class ProfileService {
         'fromUserId': userId,
         'toUserId': toUserId,
         'timestamp': FieldValue.serverTimestamp(),
+        'seen': false, // Track if the like has been seen by the recipient
       };
 
+      // Save the like
       await _firestore.collection('likes').doc(likeId).set(likeData);
-      debugPrint('Like saved: $userId → $toUserId');
+
+      // Create notification for the liked user
+      await _createLikeNotification(userId, toUserId);
+
+      // Check for mutual like and create match if needed
+      final mutualLike = await checkMutualLike(toUserId);
+      if (mutualLike) {
+        await createMatch(toUserId);
+        await _createMatchNotification(userId, toUserId);
+      }
+
+      debugPrint('Like saved: $userId to $toUserId | Mutual: $mutualLike');
       return true;
     } catch (e) {
       debugPrint('saveLike error: $e');
       return false;
+    }
+  }
+
+  // ==================================================================
+  // CREATE LIKE NOTIFICATION
+  // ==================================================================
+  Future<void> _createLikeNotification(String fromUserId, String toUserId) async {
+    try {
+      final fromUserProfile = await getUserProfile(fromUserId);
+      if (fromUserProfile == null) return;
+
+      final notificationId = '${DateTime.now().millisecondsSinceEpoch}_$fromUserId';
+      final notificationData = {
+        'type': 'like',
+        'fromUserId': fromUserId,
+        'fromUserName': fromUserProfile['fullName'] ?? 'Someone',
+        'fromUserImage': (fromUserProfile['images'] as List?)?.isNotEmpty == true
+            ? fromUserProfile['images'][0]
+            : 'https://i.pravatar.cc/300?u=$fromUserId',
+        'toUserId': toUserId,
+        'timestamp': FieldValue.serverTimestamp(),
+        'seen': false,
+        'mutual': false,
+      };
+
+      await _firestore
+          .collection('notifications')
+          .doc(notificationId)
+          .set(notificationData);
+
+      debugPrint('Like notification created for $toUserId from $fromUserId');
+    } catch (e) {
+      debugPrint('_createLikeNotification error: $e');
+    }
+  }
+
+  // ==================================================================
+  // CREATE MATCH NOTIFICATION
+  // ==================================================================
+  Future<void> _createMatchNotification(String user1Id, String user2Id) async {
+    try {
+      final user1Profile = await getUserProfile(user1Id);
+      final user2Profile = await getUserProfile(user2Id);
+
+      if (user1Profile == null || user2Profile == null) return;
+
+      // Create notification for user1
+      final notification1Id = '${DateTime.now().millisecondsSinceEpoch}_match_$user2Id';
+      await _firestore.collection('notifications').doc(notification1Id).set({
+        'type': 'match',
+        'fromUserId': user2Id,
+        'fromUserName': user2Profile['fullName'] ?? 'Someone',
+        'fromUserImage': (user2Profile['images'] as List?)?.isNotEmpty == true
+            ? user2Profile['images'][0]
+            : 'https://i.pravatar.cc/300?u=$user2Id',
+        'toUserId': user1Id,
+        'timestamp': FieldValue.serverTimestamp(),
+        'seen': false,
+        'mutual': true,
+      });
+
+      // Create notification for user2
+      final notification2Id = '${DateTime.now().millisecondsSinceEpoch}_match_$user1Id';
+      await _firestore.collection('notifications').doc(notification2Id).set({
+        'type': 'match',
+        'fromUserId': user1Id,
+        'fromUserName': user1Profile['fullName'] ?? 'Someone',
+        'fromUserImage': (user1Profile['images'] as List?)?.isNotEmpty == true
+            ? user1Profile['images'][0]
+            : 'https://i.pravatar.cc/300?u=$user1Id',
+        'toUserId': user2Id,
+        'timestamp': FieldValue.serverTimestamp(),
+        'seen': false,
+        'mutual': true,
+      });
+
+      debugPrint('Match notifications created for $user1Id and $user2Id');
+    } catch (e) {
+      debugPrint('_createMatchNotification error: $e');
+    }
+  }
+
+  // ==================================================================
+  // GET USER NOTIFICATIONS
+  // ==================================================================
+  Future<List<Map<String, dynamic>>> getUserNotifications() async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) return [];
+
+      final snapshot = await _firestore
+          .collection('notifications')
+          .where('toUserId', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .limit(50)
+          .get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          ...data,
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('getUserNotifications error: $e');
+      return [];
+    }
+  }
+
+  // ==================================================================
+  // MARK NOTIFICATION AS SEEN
+  // ==================================================================
+  Future<bool> markNotificationAsSeen(String notificationId) async {
+    try {
+      await _firestore.collection('notifications').doc(notificationId).update({
+        'seen': true,
+      });
+      return true;
+    } catch (e) {
+      debugPrint('markNotificationAsSeen error: $e');
+      return false;
+    }
+  }
+
+  // ==================================================================
+  // GET USERS WHO LIKED ME - SIMPLIFIED VERSION
+  // ==================================================================
+  Future<List<Map<String, dynamic>>> getUsersWhoLikedMe() async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) return [];
+
+      debugPrint('Fetching likes for user: $userId');
+
+      // Get ALL likes for this user
+      final snapshot = await _firestore
+          .collection('likes')
+          .where('toUserId', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      debugPrint('Found ${snapshot.docs.length} likes for user $userId');
+
+      final List<Map<String, dynamic>> likers = [];
+
+      for (var doc in snapshot.docs) {
+        final likeData = doc.data();
+        final likerId = likeData['fromUserId'];
+        final seen = likeData['seen'] ?? false;
+        
+        debugPrint('Processing like from $likerId');
+
+        // Get the liker's profile directly without visibility checks
+        final profile = await getUserProfile(likerId);
+        
+        if (profile != null) {
+          likers.add({
+            'likeId': doc.id,
+            'userId': likerId,
+            'name': profile['fullName'] ?? 'Unknown',
+            'image': (profile['images'] as List?)?.isNotEmpty == true
+                ? profile['images'][0]
+                : 'https://i.pravatar.cc/300?u=$likerId',
+            'bio': profile['bio'] ?? '',
+            'city': profile['city'] ?? 'Unknown',
+            'relationshipGoal': profile['relationshipGoal'] ?? '',
+            'timestamp': likeData['timestamp'],
+            'seen': seen,
+          });
+          debugPrint('Added liker: ${profile['fullName']}');
+        } else {
+          debugPrint('Profile not found for liker: $likerId');
+        }
+      }
+
+      // Mark unseen likes as seen
+      final unseenLikes = likers.where((liker) => liker['seen'] == false).toList();
+      for (var liker in unseenLikes) {
+        try {
+          await _firestore.collection('likes').doc(liker['likeId']).update({
+            'seen': true,
+          });
+          debugPrint('Marked like ${liker['likeId']} as seen');
+        } catch (e) {
+          debugPrint('Error marking like as seen: $e');
+        }
+      }
+
+      debugPrint('Returning ${likers.length} likers');
+      return likers;
+    } catch (e) {
+      debugPrint('getUsersWhoLikedMe error: $e');
+      return [];
+    }
+  }
+
+  // ==================================================================
+  // GET UNSEEN LIKES COUNT (for badges)
+  // ==================================================================
+  Future<int> getUnseenLikesCount() async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) return 0;
+
+      final snapshot = await _firestore
+          .collection('likes')
+          .where('toUserId', isEqualTo: userId)
+          .where('seen', isEqualTo: false)
+          .get();
+
+      return snapshot.docs.length;
+    } catch (e) {
+      debugPrint('getUnseenLikesCount error: $e');
+      return 0;
     }
   }
 
@@ -351,74 +649,93 @@ class ProfileService {
   }
 
   // ==================================================================
-  // GET USERS FOR SWIPING
+  // GET USERS FOR SWIPING – DEBUG-FRIENDLY & ROBUST
   // ==================================================================
   Future<List<Map<String, dynamic>>> getAllUsersForSwiping({
     int limit = 20,
-    bool includeDistanceFilter = false,
+    bool includeDistanceFilter = false,   // DEFAULT OFF
     double maxDistance = 100.0,
   }) async {
     try {
       final userId = currentUserId;
-      if (userId == null) return [];
-
-      final currentProfile = await getUserProfile(userId);
-      if (currentProfile == null) {
-        debugPrint('Current user profile missing');
+      if (userId == null) {
+        debugPrint('getAllUsersForSwiping: no logged-in user');
         return [];
       }
 
-      final query = _firestore
+      debugPrint('Fetching swipes for $userId (limit: $limit)');
+
+      // 1. Current profile (optional for distance)
+      final currentProfile = await getUserProfile(userId);
+      if (currentProfile == null) {
+        debugPrint('Current user has NO profile to distance filter disabled');
+      } else {
+        debugPrint('Current profile: ${currentProfile['fullName']}');
+      }
+
+      // 2. Query all other users
+      final snapshot = await _firestore
           .collection('users')
           .where('userId', isNotEqualTo: userId)
-          .limit(limit);
+          .limit(limit)
+          .get();
 
-      final snapshot = await query.get();
-      debugPrint('Found ${snapshot.docs.length} potential profiles');
+      debugPrint('Firestore returned ${snapshot.docs.length} other users');
 
-      final List<Map<String, dynamic>> users = [];
+      final List<Map<String, dynamic>> result = [];
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final profileId = doc.id;
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final otherId = doc.id;
 
-        // Required: fullName + at least one image
+        debugPrint('\n--- Checking $otherId ---');
+        debugPrint('  fullName: ${data['fullName']}');
+        debugPrint('  images count: ${(data['images'] as List?)?.length ?? 0}');
+        debugPrint('  city: ${data['city']}');
+        debugPrint('  location: ${data['location']}');
+
+        // Mandatory fields
         final images = (data['images'] as List?) ?? [];
         if (data['fullName'] == null || images.isEmpty) {
-          debugPrint('Skipping $profileId: missing name or image');
+          debugPrint('  SKIPPED – missing name or image');
           continue;
         }
 
-        // Skip if already liked
+        // Already liked?
+        bool alreadyLiked = false;
         try {
           final likeDoc = await _firestore
               .collection('likes')
-              .doc(_generateSortedId(userId, profileId))
+              .doc(_generateSortedId(userId, otherId))
               .get();
-          if (likeDoc.exists) {
-            debugPrint('Already liked: $profileId');
-            continue;
-          }
-        } catch (e) {
-          debugPrint('Likes check failed (OK): $e');
+          alreadyLiked = likeDoc.exists;
+        } catch (_) {
+          // collection missing → treat as not liked
         }
-
-        // Distance
-        final distance = _calculateDistance(
-          data['location']?['latitude'],
-          data['location']?['longitude'],
-          currentProfile['location']?['latitude'],
-          currentProfile['location']?['longitude'],
-        );
-
-        if (includeDistanceFilter && distance > maxDistance) {
-          debugPrint('Too far: $profileId ($distance km)');
+        if (alreadyLiked) {
+          debugPrint('  SKIPPED – already liked');
           continue;
         }
 
-        // Add to swipe list
-        users.add({
-          'id': profileId,
+        // Distance (only if enabled)
+        double distance = 999;
+        if (currentProfile != null && includeDistanceFilter) {
+          distance = _calculateDistance(
+            data['location']?['latitude'],
+            data['location']?['longitude'],
+            currentProfile['location']?['latitude'],
+            currentProfile['location']?['longitude'],
+          );
+          debugPrint('  Distance: $distance km');
+          if (distance > maxDistance) {
+            debugPrint('  SKIPPED – too far');
+            continue;
+          }
+        }
+
+        // Add to result
+        result.add({
+          'id': otherId,
           'name': data['fullName'],
           'firstName': data['firstName'] ?? '',
           'lastName': data['lastName'] ?? '',
@@ -426,21 +743,36 @@ class ProfileService {
           'city': data['city'] ?? 'Unknown',
           'relationshipGoal': data['relationshipGoal'] ?? '',
           'images': images.take(3).toList(),
-          'location': data['location'],
           'distance': distance,
           'compatibilityScore': _calculateCompatibilityScore(currentProfile, data),
         });
+        debugPrint('  ADDED');
       }
 
       // Sort by compatibility
-      users.sort((a, b) => (b['compatibilityScore'] as double)
-          .compareTo(a['compatibilityScore'] as double));
+      result.sort((a, b) =>
+          (b['compatibilityScore'] as double).compareTo(a['compatibilityScore'] as double));
 
-      debugPrint('Returning ${users.length} swipeable profiles');
-      return users;
-    } catch (e) {
-      debugPrint('getAllUsersForSwiping error: $e');
+      debugPrint('Returning ${result.length} swipeable profiles');
+      return result;
+    } catch (e, s) {
+      debugPrint('EXCEPTION in getAllUsersForSwiping: $e\n$s');
       return [];
+    }
+  }
+
+  // ==================================================================
+  // HELPER: Check if like exists
+  // ==================================================================
+  Future<bool> _checkLikeExists(String fromUserId, String toUserId) async {
+    try {
+      final likeDoc = await _firestore
+          .collection('likes')
+          .doc(_generateSortedId(fromUserId, toUserId))
+          .get();
+      return likeDoc.exists;
+    } catch (e) {
+      return false;
     }
   }
 

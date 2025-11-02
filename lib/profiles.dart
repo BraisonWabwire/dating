@@ -19,11 +19,13 @@ class _ProfilesState extends State<Profiles> {
   List<Map<String, dynamic>> profiles = [];
   List<Map<String, dynamic>> swiperItems = []; // Flattened list for Swiper
   bool isLoading = true;
+  int _unreadNotifications = 0;
 
   @override
   void initState() {
     super.initState();
     _fetchProfiles();
+    _loadUnreadNotifications();
   }
 
   // Fetch profiles and prepare swiper items
@@ -76,6 +78,21 @@ class _ProfilesState extends State<Profiles> {
     }
   }
 
+  // Load unread notifications count
+  Future<void> _loadUnreadNotifications() async {
+    try {
+      final notifications = await _profileService.getUserNotifications();
+      final unreadCount = notifications.where((n) => n['seen'] == false).length;
+      if (mounted) {
+        setState(() {
+          _unreadNotifications = unreadCount;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading notifications: $e');
+    }
+  }
+
   // Handle like action for the entire profile
   Future<void> _handleLike(String toUserId) async {
     if (_authService.currentUserId == null) {
@@ -91,16 +108,18 @@ class _ProfilesState extends State<Profiles> {
       if (success) {
         final isMutual = await _profileService.checkMutualLike(toUserId);
         if (isMutual) {
-          await _profileService.createMatch(toUserId);
+          // Match notification will be handled automatically by saveLike
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('It\'s a match! You can now chat.')),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Like saved! Waiting for their like.')),
+            const SnackBar(content: Text('Like saved! They\'ll be notified.')),
           );
         }
         _removeProfile(toUserId);
+        // Refresh notifications count
+        _loadUnreadNotifications();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to save like')),
@@ -129,6 +148,16 @@ class _ProfilesState extends State<Profiles> {
     });
   }
 
+  // Navigate to likes page
+  void _navigateToLikesPage() {
+    Navigator.pushNamed(context, '/likes');
+  }
+
+  // Navigate to notifications page
+  void _navigateToNotificationsPage() {
+    Navigator.pushNamed(context, '/notifications');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -144,6 +173,41 @@ class _ProfilesState extends State<Profiles> {
         backgroundColor: const Color(0xFFE91E63),
         centerTitle: true,
         actions: [
+          // Notifications icon with badge
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications, color: Colors.white),
+                tooltip: 'Notifications',
+                onPressed: _navigateToNotificationsPage,
+              ),
+              if (_unreadNotifications > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      _unreadNotifications > 9 ? '9+' : '$_unreadNotifications',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
             tooltip: 'Log out',
@@ -167,7 +231,33 @@ class _ProfilesState extends State<Profiles> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : swiperItems.isEmpty
-              ? const Center(child: Text('No profiles available'))
+              ? Center(
+                child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.people_outline, size: 80, color: Colors.grey),
+                      const SizedBox(height: 20),
+                      const Text(
+                        'No more profiles to show',
+                        style: TextStyle(fontSize: 18, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Check back later for new profiles',
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: _fetchProfiles,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFE91E63),
+                        ),
+                        child: const Text('Refresh Profiles', style: TextStyle(color: Colors.white),),
+                      ),
+                    ],
+                  ),
+              )
               : Column(
                   children: [
                     Padding(
@@ -413,15 +503,18 @@ class _ProfilesState extends State<Profiles> {
                   ],
                 ),
               ),
-              const Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.favorite, color: Colors.white, size: 30),
-                  Text(
-                    "Likes",
-                    style: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ],
+              GestureDetector(
+                onTap: _navigateToLikesPage,
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.favorite, color: Colors.white, size: 30),
+                    Text(
+                      "Likes",
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
               GestureDetector(
                 onTap: () {
@@ -443,15 +536,38 @@ class _ProfilesState extends State<Profiles> {
                   ],
                 ),
               ),
-              const Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.people, color: Colors.white, size: 30),
-                  Text(
-                    "matches",
-                    style: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ],
+              GestureDetector(
+                onTap: _navigateToNotificationsPage,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Stack(
+                      children: [
+                        const Icon(Icons.notifications, color: Colors.white, size: 30),
+                        if (_unreadNotifications > 0)
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              constraints: const BoxConstraints(
+                                minWidth: 12,
+                                minHeight: 12,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const Text(
+                      "Alerts",
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

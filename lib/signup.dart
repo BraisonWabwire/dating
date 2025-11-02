@@ -152,11 +152,6 @@ class _SignupState extends State<Signup> {
                                             ),
                                           ),
                                         );
-                                        Navigator.pushNamedAndRemoveUntil(
-                                          context,
-                                          '/email_verification',
-                                          (route) => false,
-                                        );
                                       }
                                     } catch (e) {
                                       ScaffoldMessenger.of(context).showSnackBar(

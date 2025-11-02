@@ -1,3 +1,4 @@
+import 'package:dating/LikesPage.dart';
 import 'package:dating/chat_page.dart';
 import 'package:dating/profiles.dart';
 import 'package:dating/update_profile.dart';
@@ -68,7 +69,7 @@ class MyApp extends StatelessWidget {
         },
         '/update_profile': (context) => const UpdateProfile(),
         // '/chat': (context) => const ChatPage(),
-        // '/likes': (context) => const LikesScreen(),
+        '/likes': (context) => const LikesPage(),
         // '/chats': (context) => const ChatsScreen(),
         // '/search': (context) => const SearchScreen(),
       },
